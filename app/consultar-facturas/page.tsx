@@ -55,6 +55,16 @@ interface InvoiceItem {
   total: number;
   tax?: number;
   discount?: number;
+  account?: {
+    code: string;
+    movement: string;
+  };
+  due?: {
+    prefix: string;
+    consecutive: number;
+    quote: number;
+    date: string;
+  };
 }
 
 interface Payment {
@@ -672,16 +682,34 @@ function ClientSideConsultarFacturas() {
           const currency = doc.currency || {};
 
           const items: InvoiceItem[] = Array.isArray(doc.items)
-            ? doc.items.map((item: any): InvoiceItem => ({
-                id: String(item.id ?? Math.random().toString(36).slice(2)),
-                code: item.code || item.sku || item.product_code || item?.account?.code || '',
-                description: item.description || item.name || 'Producto sin descripción',
-                quantity: typeof item.quantity !== 'undefined' ? Number(item.quantity) : 1,
-                price: Number(item.price ?? item.value ?? 0),
-                total: Number(item.total ?? item.value ?? (Number(item.quantity || 1) * Number(item.price || 0))),
-                tax: Number(item.tax ?? 0),
-                discount: Number(item.discount ?? 0),
-              }))
+            ? doc.items.map((item: any): InvoiceItem => {
+                const value = Number(item.value || 0);
+                const movement = item.account?.movement;
+                const isCredit = movement === 'Credit';
+                const isDebit = movement === 'Debit';
+                
+                return {
+                  id: String(item.id ?? Math.random().toString(36).slice(2)),
+                  code: item.code || item.sku || item.product_code || item?.account?.code || '',
+                  description: item.description || item.name || 'Producto sin descripción',
+                  quantity: typeof item.quantity !== 'undefined' ? Number(item.quantity) : 1,
+                  price: value,
+                  total: isDebit ? -value : value, // Debit se muestra como negativo
+                  tax: Number(item.tax ?? 0),
+                  discount: Number(item.discount ?? 0),
+                  // Agregar información adicional para vouchers
+                  account: item.account ? {
+                    code: item.account.code,
+                    movement: item.account.movement
+                  } : undefined,
+                  due: item.due ? {
+                    prefix: item.due.prefix,
+                    consecutive: item.due.consecutive,
+                    quote: item.due.quote,
+                    date: item.due.date
+                  } : undefined
+                };
+              })
             : ([] as InvoiceItem[]);
 
           const payments: Payment[] = Array.isArray(doc.payments)
@@ -694,20 +722,42 @@ function ClientSideConsultarFacturas() {
               }))
             : ([] as Payment[]);
 
-          const itemsSum: number = items.reduce((sum: number, it: InvoiceItem) => sum + (Number(it.total) || 0), 0);
-          const paymentsSum: number = payments.reduce((sum: number, pay: Payment) => sum + (Number(pay.value) || 0), 0);
-
-          let computedTotal: number;
-          if (doc.total !== undefined && doc.total !== null) {
-            computedTotal = Number(doc.total);
-          } else if (doc.amount !== undefined && doc.amount !== null) {
-            computedTotal = Number(doc.amount);
-          } else if (doc.value !== undefined && doc.value !== null) {
-            computedTotal = Number(doc.value);
-          } else if (itemsSum > 0) {
-            computedTotal = itemsSum;
+          // Para vouchers (RC), calcular el total basado en movimientos contables
+          let computedTotal: number = 0;
+          
+          if (doc.items && Array.isArray(doc.items)) {
+            // Calcular total basado en movimientos contables
+            computedTotal = doc.items.reduce((sum: number, item: any) => {
+              const value = Number(item.value || 0);
+              const movement = item.account?.movement;
+              
+              if (movement === 'Credit') {
+                // Credit suma (ingresos)
+                return sum + value;
+              } else if (movement === 'Debit') {
+                // Debit resta (egresos)
+                return sum - value;
+              } else {
+                // Si no hay movimiento definido, usar el valor tal como está
+                return sum + value;
+              }
+            }, 0);
           } else {
-            computedTotal = paymentsSum;
+            // Fallback para otros casos
+            const itemsSum: number = items.reduce((sum: number, it: InvoiceItem) => sum + (Number(it.total) || 0), 0);
+            const paymentsSum: number = payments.reduce((sum: number, pay: Payment) => sum + (Number(pay.value) || 0), 0);
+
+            if (doc.total !== undefined && doc.total !== null) {
+              computedTotal = Number(doc.total);
+            } else if (doc.amount !== undefined && doc.amount !== null) {
+              computedTotal = Number(doc.amount);
+            } else if (doc.value !== undefined && doc.value !== null) {
+              computedTotal = Number(doc.value);
+            } else if (itemsSum > 0) {
+              computedTotal = itemsSum;
+            } else {
+              computedTotal = paymentsSum;
+            }
           }
 
           const supplier = doc.supplier
@@ -1170,45 +1220,60 @@ function ClientSideConsultarFacturas() {
                   <div className="border rounded-lg overflow-hidden">
                     <div className="bg-gray-50 px-4 py-3 border-b">
                       <div className="grid grid-cols-12 gap-4">
-                        <div className="col-span-5 font-medium text-sm">Artículo</div>
-                        <div className="col-span-2 text-right font-medium text-sm">Cantidad</div>
-                        <div className="col-span-2 text-right font-medium text-sm">Precio Unit.</div>
-                        <div className="col-span-3 text-right font-medium text-sm">Total</div>
+                        <div className="col-span-4 font-medium text-sm">Descripción</div>
+                        <div className="col-span-2 font-medium text-sm">Cuenta</div>
+                        <div className="col-span-2 font-medium text-sm">Movimiento</div>
+                        <div className="col-span-2 text-right font-medium text-sm">Valor</div>
+                        <div className="col-span-2 text-right font-medium text-sm">Total</div>
                       </div>
                     </div>
                     
                     <div className="divide-y">
                       {selectedInvoice.items?.length ? (
-                        selectedInvoice.items.map((item: any) => (
-                          <div key={item.id} className="px-4 py-3 hover:bg-gray-50">
-                            <div className="grid grid-cols-12 gap-4 items-center">
-                              <div className="col-span-5">
-                                <div className="font-medium">{item.description || 'Sin descripción'}</div>
-                                <div className="flex flex-wrap gap-2 mt-1">
-                                  {item.code && (
-                                    <span className="text-xs bg-gray-100 rounded px-2 py-0.5">
-                                      Código: {item.code}
-                                    </span>
-                                  )}
-                                  {item.type && (
-                                    <span className="text-xs bg-gray-100 rounded px-2 py-0.5">
-                                      Tipo: {item.type}
-                                    </span>
-                                  )}
+                        selectedInvoice.items.map((item: any) => {
+                          const isDebit = item.account?.movement === 'Debit';
+                          const isCredit = item.account?.movement === 'Credit';
+                          const movementColor = isDebit ? 'text-red-600' : isCredit ? 'text-green-600' : 'text-gray-600';
+                          const movementText = isDebit ? 'Débito' : isCredit ? 'Crédito' : 'N/A';
+                          
+                          return (
+                            <div key={item.id} className="px-4 py-3 hover:bg-gray-50">
+                              <div className="grid grid-cols-12 gap-4 items-center">
+                                <div className="col-span-4">
+                                  <div className="font-medium">{item.description || 'Sin descripción'}</div>
+                                  <div className="flex flex-wrap gap-2 mt-1">
+                                    {item.code && (
+                                      <span className="text-xs bg-gray-100 rounded px-2 py-0.5">
+                                        Código: {item.code}
+                                      </span>
+                                    )}
+                                    {item.due && (
+                                      <span className="text-xs bg-blue-100 rounded px-2 py-0.5">
+                                        {item.due.prefix}-{item.due.consecutive} (Cuota {item.due.quote})
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="col-span-2">
+                                  <span className="text-sm font-mono">{item.account?.code || 'N/A'}</span>
+                                </div>
+                                <div className="col-span-2">
+                                  <span className={`text-sm font-medium ${movementColor}`}>
+                                    {movementText}
+                                  </span>
+                                </div>
+                                <div className="col-span-2 text-right">
+                                  {`$${Number(item.price).toLocaleString('es-CO', {maximumFractionDigits: 2})}`}
+                                </div>
+                                <div className="col-span-2 text-right font-medium">
+                                  <span className={isDebit ? 'text-red-600' : isCredit ? 'text-green-600' : ''}>
+                                    {isDebit ? '-' : isCredit ? '+' : ''}${Math.abs(Number(item.total)).toLocaleString('es-CO', {maximumFractionDigits: 2})}
+                                  </span>
                                 </div>
                               </div>
-                              <div className="col-span-2 text-right">
-                                {item.quantity}
-                              </div>
-                              <div className="col-span-2 text-right">
-                                {`$${Number(item.price).toLocaleString('es-CO', {maximumFractionDigits: 2})}`}
-                              </div>
-                              <div className="col-span-3 text-right font-medium">
-                                {`$${Number(item.total).toLocaleString('es-CO', {maximumFractionDigits: 2})}`}
-                              </div>
                             </div>
-                          </div>
-                        ))
+                          );
+                        })
                       ) : (
                         <div className="px-4 py-8 text-center text-muted-foreground">
                           No hay artículos en esta factura
@@ -1247,36 +1312,69 @@ function ClientSideConsultarFacturas() {
 
                     {/* Totales */}
                     <div className="space-y-2">
-                      <h3 className="text-lg font-semibold">Resumen de Valores</h3>
+                      <h3 className="text-lg font-semibold">Resumen Contable</h3>
                       <div className="space-y-2 text-sm">
-                        <div className="flex justify-between">
-                          <span>Subtotal:</span>
-                          <span className="whitespace-nowrap">
-                            ${(Number(selectedInvoice.total || 0) - (Number(selectedInvoice.tax || 0)) - (Number(selectedInvoice.discount || 0)))
-                              .toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}
-                          </span>
-                        </div>
-                        
-                        {selectedInvoice.discount && Number(selectedInvoice.discount) > 0 && (
-                          <div className="flex justify-between">
-                            <span>Descuento:</span>
-                            <span className="text-red-600 whitespace-nowrap">
-                              -${Number(selectedInvoice.discount || 0).toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}
-                            </span>
-                          </div>
+                        {selectedInvoice.type === 'RC' ? (
+                          // Para recibos de caja, mostrar el balance contable
+                          <>
+                            <div className="flex justify-between">
+                              <span>Total Créditos:</span>
+                              <span className="text-green-600 whitespace-nowrap">
+                                +${selectedInvoice.items?.filter((item: any) => item.account?.movement === 'Credit')
+                                  .reduce((sum: number, item: any) => sum + Number(item.price || 0), 0)
+                                  .toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}
+                              </span>
+                            </div>
+                            
+                            <div className="flex justify-between">
+                              <span>Total Débitos:</span>
+                              <span className="text-red-600 whitespace-nowrap">
+                                -${selectedInvoice.items?.filter((item: any) => item.account?.movement === 'Debit')
+                                  .reduce((sum: number, item: any) => sum + Number(item.price || 0), 0)
+                                  .toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}
+                              </span>
+                            </div>
+                            
+                            <div className="flex justify-between pt-2 border-t mt-2 font-bold text-lg">
+                              <span>Balance:</span>
+                              <span className={`whitespace-nowrap ${Number(selectedInvoice.total || 0) === 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                {Number(selectedInvoice.total || 0) === 0 ? '✓ Balanceado' : `$${Number(selectedInvoice.total || 0).toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}`}
+                              </span>
+                            </div>
+                          </>
+                        ) : (
+                          // Para otros tipos de documentos, mostrar el resumen normal
+                          <>
+                            <div className="flex justify-between">
+                              <span>Subtotal:</span>
+                              <span className="whitespace-nowrap">
+                                ${(Number(selectedInvoice.total || 0) - (Number(selectedInvoice.tax || 0)) - (Number(selectedInvoice.discount || 0)))
+                                  .toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}
+                              </span>
+                            </div>
+                            
+                            {selectedInvoice.discount && Number(selectedInvoice.discount) > 0 && (
+                              <div className="flex justify-between">
+                                <span>Descuento:</span>
+                                <span className="text-red-600 whitespace-nowrap">
+                                  -${Number(selectedInvoice.discount || 0).toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}
+                                </span>
+                              </div>
+                            )}
+                            
+                            {selectedInvoice.tax && Number(selectedInvoice.tax) > 0 && (
+                              <div className="flex justify-between">
+                                <span>Impuestos:</span>
+                                <span className="whitespace-nowrap">${Number(selectedInvoice.tax || 0).toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
+                              </div>
+                            )}
+                            
+                            <div className="flex justify-between pt-2 border-t mt-2 font-bold text-lg">
+                              <span>Total:</span>
+                              <span className="whitespace-nowrap">${Number(selectedInvoice.total || 0).toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
+                            </div>
+                          </>
                         )}
-                        
-                        {selectedInvoice.tax && Number(selectedInvoice.tax) > 0 && (
-                          <div className="flex justify-between">
-                            <span>Impuestos:</span>
-                            <span className="whitespace-nowrap">${Number(selectedInvoice.tax || 0).toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
-                          </div>
-                        )}
-                        
-                        <div className="flex justify-between pt-2 border-t mt-2 font-bold text-lg">
-                          <span>Total:</span>
-                          <span className="whitespace-nowrap">${Number(selectedInvoice.total || 0).toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
-                        </div>
                       </div>
                     </div>
                   </div>
