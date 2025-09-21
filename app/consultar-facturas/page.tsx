@@ -249,8 +249,15 @@ function ClientSideConsultarFacturas() {
       
       if (selectedDocType.type === 'sale') {
         // Usar el endpoint específico para facturas de venta
-        endpoint = `/api/siigo/invoices/${selectedDocType.id.toLowerCase()}`;
-        console.log('API Endpoint (sale):', endpoint);
+        if (selectedDocType.id === 'RC') {
+          // Para recibos de caja, usar la ruta específica de vouchers
+          endpoint = `/api/siigo/vouchers`;
+          console.log('API Endpoint (RC vouchers):', endpoint);
+        } else {
+          // Para otros tipos de venta, usar la ruta de invoices
+          endpoint = `/api/siigo/invoices/${selectedDocType.id.toLowerCase()}`;
+          console.log('API Endpoint (sale):', endpoint);
+        }
         response = await fetch(endpoint);
       } else {
         // Para facturas de compra y otros documentos
@@ -293,6 +300,9 @@ function ClientSideConsultarFacturas() {
         invoicesData = responseData.items;
       } else if (responseData.data && Array.isArray(responseData.data)) {
         invoicesData = responseData.data;
+      } else if (responseData.vouchers && Array.isArray(responseData.vouchers)) {
+        // Handle vouchers response format specifically
+        invoicesData = responseData.vouchers;
       } else if (typeof responseData === 'object' && responseData !== null) {
         // If it's an object but not an array, try to extract data from it
         const dataKeys = Object.keys(responseData);
@@ -300,7 +310,7 @@ function ClientSideConsultarFacturas() {
           // If there's a key that looks like it contains an array, use that
           const arrayKey = dataKeys.find(key => 
             Array.isArray(responseData[key]) && 
-            ['invoices', 'documents', 'items', 'results'].includes(key.toLowerCase())
+            ['invoices', 'documents', 'items', 'results', 'vouchers'].includes(key.toLowerCase())
           );
           
           if (arrayKey) {
@@ -636,16 +646,122 @@ function ClientSideConsultarFacturas() {
         includeDependencies: 'true'
       });
       
-      // Si es un tipo específico de factura de venta, agregar el parámetro documentType
-      if (selectedDocType.documentType) {
-        params.append('documentType', selectedDocType.documentType);
-      } else {
-        // Para tipos de documento estándar, usar el type
-        params.append('type', selectedDocType.id);
-      }
+      // Para tipos de documento estándar, usar el type
+      params.append('type', selectedDocType.id);
       
       // Usar el endpoint correspondiente según el tipo de documento
-      const endpoint = `/api/siigo/${selectedDocType.endpoint}`;
+      let endpoint = `/api/siigo/${selectedDocType.endpoint}`;
+      
+      // Si es RC (Recibo de Caja), usar la ruta específica de vouchers
+      if (selectedDocType.id === 'RC') {
+        endpoint = `/api/siigo/vouchers`;
+        // Para vouchers, no necesitamos parámetros adicionales ya que están hardcodeados en la ruta
+        const result = await fetchWithAuth(endpoint);
+        
+        if (!result || result.success === false) {
+          console.error('Error in response:', result);
+          throw new Error(result?.error || 'Error al procesar la respuesta');
+        }
+        
+        const raw = result.vouchers || [];
+        const documents: any[] = Array.isArray(raw) ? raw : [];
+        const formattedInvoices: Invoice[] = documents.map((doc: any) => {
+          // Mapear los datos de vouchers al formato de Invoice
+          const docType = 'RC';
+          const party = doc.customer || doc.supplier || doc.third || doc.payer || {};
+          const currency = doc.currency || {};
+
+          const items: InvoiceItem[] = Array.isArray(doc.items)
+            ? doc.items.map((item: any): InvoiceItem => ({
+                id: String(item.id ?? Math.random().toString(36).slice(2)),
+                code: item.code || item.sku || item.product_code || item?.account?.code || '',
+                description: item.description || item.name || 'Producto sin descripción',
+                quantity: typeof item.quantity !== 'undefined' ? Number(item.quantity) : 1,
+                price: Number(item.price ?? item.value ?? 0),
+                total: Number(item.total ?? item.value ?? (Number(item.quantity || 1) * Number(item.price || 0))),
+                tax: Number(item.tax ?? 0),
+                discount: Number(item.discount ?? 0),
+              }))
+            : ([] as InvoiceItem[]);
+
+          const payments: Payment[] = Array.isArray(doc.payments)
+            ? doc.payments.map((p: any): Payment => ({
+                id: String(p.id ?? Math.random().toString(36).slice(2)),
+                method: p.method || p.payment_method || p.payment_mean?.name || 'No especificado',
+                value: Number(p.value ?? p.amount ?? 0),
+                due_date: p.due_date || p.payment_due_date || p.date || '',
+                status: p.status || 'pending',
+              }))
+            : ([] as Payment[]);
+
+          const itemsSum: number = items.reduce((sum: number, it: InvoiceItem) => sum + (Number(it.total) || 0), 0);
+          const paymentsSum: number = payments.reduce((sum: number, pay: Payment) => sum + (Number(pay.value) || 0), 0);
+
+          let computedTotal: number;
+          if (doc.total !== undefined && doc.total !== null) {
+            computedTotal = Number(doc.total);
+          } else if (doc.amount !== undefined && doc.amount !== null) {
+            computedTotal = Number(doc.amount);
+          } else if (doc.value !== undefined && doc.value !== null) {
+            computedTotal = Number(doc.value);
+          } else if (itemsSum > 0) {
+            computedTotal = itemsSum;
+          } else {
+            computedTotal = paymentsSum;
+          }
+
+          const supplier = doc.supplier
+            ? {
+                id: String(doc.supplier.id ?? ''),
+                name: doc.supplier.name || '',
+                identification: String(doc.supplier.identification ?? ''),
+                branch_office: doc.supplier.branch_office != null ? String(doc.supplier.branch_office) : undefined,
+              }
+            : undefined;
+
+          return {
+            id: String(doc.id ?? Math.random().toString(36).slice(2)),
+            number: String(doc.number ?? doc.code ?? doc.consecutive ?? 'N/A'),
+            date: doc.date || doc.issue_date || doc.created_at || new Date().toISOString(),
+            due_date: doc.due_date || doc.expiration_date || doc.payment_due_date || '',
+            customer: {
+              id: String((party as any).id ?? ''),
+              name: (party as any).name || doc.customer_name || doc.supplier?.name || doc.payer?.name || 'Cliente no especificado',
+              identification: (party as any).identification || (party as any).identification_number || doc.customer_identification || '',
+              email: (party as any).email || doc.customer_email || '',
+              phone: (party as any).phone || doc.customer_phone || '',
+              address: (party as any).address || doc.customer_address || '',
+            },
+            supplier,
+            type: docType,
+            total: Math.abs(computedTotal || 0),
+            tax: Math.abs(Number(doc.tax ?? 0)),
+            discount: Math.abs(Number(doc.discount ?? 0)),
+            status: String(doc.status || 'draft').toLowerCase() as Invoice['status'],
+            created_at: doc.created_at || new Date().toISOString(),
+            updated_at: doc.updated_at || undefined,
+            items,
+            payments,
+            document_type: {
+              id: 'RC',
+              name: 'Recibo de Caja',
+              code: 'RC',
+            },
+            currency: {
+              code: currency.code || 'COP',
+              symbol: currency.symbol || '$',
+            },
+            automatic_number: doc.automatic_number,
+            consecutive: doc.consecutive,
+            metadata: doc.metadata || {},
+          };
+        });
+        
+        setInvoices(formattedInvoices);
+        setSearchPerformed(true);
+        return;
+      }
+      
       const result = await fetchWithAuth(`${endpoint}?${params.toString()}`);
       
       if (!result || result.success === false) {
