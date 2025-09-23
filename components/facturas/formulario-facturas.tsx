@@ -533,11 +533,7 @@ export default function InvoiceForm() {
       errors.push('Debe seleccionar un cliente');
     }
     
-    if (state.invoiceType === 'purchase') {
-      if (!state.providerInvoiceNumber?.trim()) {
-        errors.push('El número de factura es requerido');
-      }
-    }
+    // En compras (FC) el número de factura se maneja automático/oculto, no bloqueamos el envío.
     
     // Validaciones específicas para venta
     if (state.invoiceType === 'sale') {
@@ -767,7 +763,7 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
       // Construir el payload robusto para SIIGO
       const payload = buildSiigoPayload();
       const endpoint = state.invoiceType === 'purchase'
-        ? '/api/siigo/compras'
+        ? '/api/siigo/invoices/fc'
         : (state.saleDocumentType === 'RC' ? '/api/siigo/vouchers' : '/api/siigo/ventas');
       const response = await fetch(endpoint, {
         method: 'POST',

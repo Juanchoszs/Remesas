@@ -86,7 +86,7 @@ interface Invoice {
   customer?: Customer;
   supplier?: {
     id?: string;
-    name?: string;
+       name?: string;
     identification?: string;
     branch_office?: string;
   };
@@ -141,10 +141,10 @@ interface Invoice {
   [key: string]: any; // For any additional properties
 }
 
-// Helper function to get status information
+// <H></H>elper function to get status information
 const getStatusInfo = (status: string) => {
   switch (status?.toLowerCase()) {
-    case 'draft':
+    case 'draft':   
       return { variant: 'outline' as const, text: 'Borrador' };
     case 'posted':
       return { variant: 'default' as const, text: 'Publicada' };
@@ -929,7 +929,7 @@ function ClientSideConsultarFacturas() {
           metadata: doc.metadata || {},
         };
       });
-      
+       
       setInvoices(formattedInvoices);
       setSearchPerformed(true);
     } catch (err) {

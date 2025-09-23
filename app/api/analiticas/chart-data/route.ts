@@ -1,38 +1,76 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 
+// Definición de tipos
+interface ChartDataRow {
+  month: number | string;
+  year: number | string;
+  total_value: string | number;
+  processed_rows: number;
+}
+
 export async function GET(request: Request) {
   try {
+    // Obtener parámetros de la URL
     const { searchParams } = new URL(request.url);
     const documentType = searchParams.get('documentType') || 'FC';
     const timeRange = searchParams.get('timeRange') || 'month';
-    const userId = 1; // TODO: Get from session/token
+    
+    // TODO: Implementar autenticación real
+    const userId = 1; // Temporalmente fijo, debería venir de la sesión
 
-    // Get current date values for filtering
+    // Obtener valores de fecha actual para filtros
     const now = new Date();
     const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth() + 1; // JavaScript months are 0-based
+    const currentMonth = now.getMonth() + 1; // Los meses en JS son 0-11
     const currentQuarter = Math.floor((currentMonth - 1) / 3) + 1;
 
-    // Execute the query with parameters using template literals
-    const result = await sql`
+    // Construir la consulta SQL con parámetros seguros
+    let query = `
       WITH meses AS (
         SELECT 
           EXTRACT(MONTH FROM uploaded_at)::integer as mes,
           EXTRACT(YEAR FROM uploaded_at)::integer as anio,
-          SUM(total_value) as valor_total,
-          SUM(processed_rows) as filas_procesadas
+          COALESCE(SUM(total_value), 0) as valor_total,
+          COALESCE(SUM(processed_rows), 0) as filas_procesadas
         FROM 
           uploaded_files
         WHERE 
           user_id = ${userId}
-          AND document_type = ${documentType}
-          ${sql.unsafe(timeRange === 'day' ? "AND uploaded_at >= CURRENT_DATE - INTERVAL '30 days'" : '')}
-          ${sql.unsafe(timeRange === 'week' ? "AND uploaded_at >= CURRENT_DATE - INTERVAL '12 weeks'" : '')}
-          ${sql.unsafe(timeRange === 'month' ? `AND (year = ${currentYear} OR (year = ${currentYear - 1} AND month > ${currentMonth}))` : '')}
-          ${sql.unsafe(timeRange === 'quarter' ? `AND ((year = ${currentYear} AND month >= ${(currentQuarter - 1) * 3 + 1}) OR (year = ${currentYear - 1} AND month > ${(currentQuarter - 1) * 3 + 1}))` : '')}
-          ${sql.unsafe(timeRange === 'year' ? `AND year >= ${currentYear - 4}` : '')}
-          ${sql.unsafe(!['day', 'week', 'month', 'quarter', 'year'].includes(timeRange) ? `AND (year = ${currentYear} OR (year = ${currentYear - 1} AND month > ${currentMonth}))` : '')}
+          AND document_type = '${documentType}'
+    `;
+
+    // Añadir condiciones de filtrado según el rango de tiempo
+    switch (timeRange) {
+      case 'day':
+        query += " AND uploaded_at >= CURRENT_DATE - INTERVAL '30 days'";
+        break;
+      case 'week':
+        query += " AND uploaded_at >= CURRENT_DATE - INTERVAL '12 weeks'";
+        break;
+      case 'month':
+        query += ` AND (EXTRACT(YEAR FROM uploaded_at) = ${currentYear} OR 
+                       (EXTRACT(YEAR FROM uploaded_at) = ${currentYear - 1} AND 
+                        EXTRACT(MONTH FROM uploaded_at) > ${currentMonth}))`;
+        break;
+      case 'quarter':
+        const quarterStartMonth = (currentQuarter - 1) * 3 + 1;
+        query += ` AND ((EXTRACT(YEAR FROM uploaded_at) = ${currentYear} AND 
+                         EXTRACT(MONTH FROM uploaded_at) >= ${quarterStartMonth}) OR 
+                        (EXTRACT(YEAR FROM uploaded_at) = ${currentYear - 1} AND 
+                         EXTRACT(MONTH FROM uploaded_at) > ${quarterStartMonth}))`;
+        break;
+      case 'year':
+        query += ` AND EXTRACT(YEAR FROM uploaded_at) >= ${currentYear - 4}`;
+        break;
+      default:
+        query += ` AND (EXTRACT(YEAR FROM uploaded_at) = ${currentYear} OR 
+                       (EXTRACT(YEAR FROM uploaded_at) = ${currentYear - 1} AND 
+                        EXTRACT(MONTH FROM uploaded_at) > ${currentMonth}))`;
+    }
+
+    // Continuar con el resto de la consulta
+    query += `
         GROUP BY 
           EXTRACT(YEAR FROM uploaded_at),
           EXTRACT(MONTH FROM uploaded_at)
@@ -46,18 +84,14 @@ export async function GET(request: Request) {
         meses
       ORDER BY 
         anio ASC, mes ASC
-    ` as unknown as { rows: ChartDataRow[] };
+    `;
 
-    interface ChartDataRow {
-      month: number | string;
-      year: number | string;
-      total_value: string | number;
-      processed_rows: number;
-    }
+    // Ejecutar la consulta SQL
+    const result = await sql.unsafe(query) as unknown as { rows: ChartDataRow[] };
 
 
     // Format data for the chart
-    const labels: string[] = [];
+    const labels: string[] = [];  
     const values: number[] = [];
     
     result.rows.forEach((row: ChartDataRow) => {
