@@ -658,7 +658,7 @@ function ClientSideConsultarFacturas() {
       
       // Para tipos de documento estándar, usar el type
       params.append('type', selectedDocType.id);
-      
+       
       // Usar el endpoint correspondiente según el tipo de documento
       let endpoint = `/api/siigo/${selectedDocType.endpoint}`;
       

@@ -121,3 +121,69 @@ export async function GET(request: Request) {
     );
   }
 }
+
+export async function POST(request: Request) {
+  try {
+    if (!SIIGO_PARTNER_ID) {
+      return NextResponse.json(
+        { error: 'Configuración incompleta', details: 'Falta SIIGO_PARTNER_ID' },
+        { status: 500 }
+      );
+    }
+
+    const token = await getSiigoToken();
+    const body = await request.json();
+
+    // Validación mínima basada en documentación Siigo para RC (DebtPayment / AdvancePayment / Detailed)
+    if (!body?.date || typeof body.date !== 'string') {
+      return NextResponse.json({ error: 'date requerido (YYYY-MM-DD)' }, { status: 400 });
+    }
+    if (!body?.document?.id) {
+      return NextResponse.json({ error: 'document.id requerido (ID del comprobante RC)' }, { status: 400 });
+    }
+    if (!body?.type || !['DebtPayment','AdvancePayment','Detailed'].includes(body.type)) {
+      return NextResponse.json({ error: "type requerido ('DebtPayment' | 'AdvancePayment' | 'Detailed')" }, { status: 400 });
+    }
+    if (!body?.customer?.identification) {
+      return NextResponse.json({ error: 'customer.identification requerido' }, { status: 400 });
+    }
+    if (body.type === 'DebtPayment') {
+      if (!Array.isArray(body?.items) || body.items.length === 0) {
+        return NextResponse.json({ error: 'items[] requerido (mínimo 1) para DebtPayment' }, { status: 400 });
+      }
+    }
+    if (!body?.payment?.id || !body?.payment?.value) {
+      return NextResponse.json({ error: 'payment.id y payment.value requeridos' }, { status: 400 });
+    }
+
+    const url = `${SIIGO_BASE}/vouchers`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Partner-Id': SIIGO_PARTNER_ID,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: 'Error al crear el recibo de caja', details: data },
+        { status: response.status }
+      );
+    }
+
+    return NextResponse.json(data, { status: 201 });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: 'Error inesperado al crear el recibo de caja',
+        details: error instanceof Error ? error.message : 'Error desconocido',
+      },
+      { status: 500 }
+    );
+  }
+}

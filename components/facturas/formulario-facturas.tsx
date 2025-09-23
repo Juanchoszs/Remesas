@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useReducer, useState, useCallback } from 'react';
+import { useReducer, useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { InvoiceItem } from "@/types/siigo";
 import { Textarea } from "@/components/ui/textarea";
@@ -188,6 +188,7 @@ interface InvoiceState {
   costCenter: string;
   cufe?: string;
   currency?: string;
+  currencyExchangeRate?: number;
   seller?: number;
   paymentMethod?: string;
   dueDate?: string;
@@ -197,6 +198,16 @@ interface InvoiceState {
   mail?: {
     send: boolean;
   };
+  // Campos específicos para ventas: tipo de documento FV o RC
+  saleDocumentType?: 'FV' | 'RC';
+  // Campos específicos para RC (Recibo de Caja)
+  rcDocumentId?: number; // ID del tipo de comprobante RC en Siigo
+  rcItems?: Array<{
+    due: { prefix: string; consecutive: number; quote?: number; date?: string };
+    value: number;
+  }>;
+  rcPaymentId?: number; // ID de forma de pago en Siigo
+  rcType?: 'DebtPayment' | 'AdvancePayment' | 'Detailed';
 }
 
 type InvoiceFormAction =
@@ -218,6 +229,11 @@ type InvoiceFormAction =
         | { field: 'costCenter'; value: string }
         | { field: 'ivaPercentage' | 'seller'; value: number }
         | { field: 'currency'; value: string | undefined }
+        | { field: 'currencyExchangeRate'; value: number }
+        | { field: 'saleDocumentType'; value: 'FV' | 'RC' }
+        | { field: 'rcDocumentId' | 'rcPaymentId'; value: number | undefined }
+        | { field: 'rcItems'; value: InvoiceState['rcItems'] }
+        | { field: 'rcType'; value: 'DebtPayment' | 'AdvancePayment' | 'Detailed' }
         | { field: 'stamp' | 'mail'; value: { send: boolean } }
       );
     }
@@ -281,11 +297,17 @@ const initialState: InvoiceState = {
   providerIdentification: '',
   costCenter: '1',
   currency: 'COP',
+  currencyExchangeRate: 1,
   seller: 1, // ID del vendedor por defecto
   paymentMethod: SIIGO_CONFIG.PAYMENT_METHODS[0].id, // Método de pago por defecto (el primero de la lista)
   dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 días a partir de hoy
   stamp: { send: true },
-  mail: { send: true }
+  mail: { send: true },
+  saleDocumentType: 'FV',
+  rcDocumentId: undefined,
+  rcItems: [],
+  rcPaymentId: undefined
+  , rcType: 'DebtPayment'
 };
 
 const invoiceFormReducer = (state: InvoiceState, action: InvoiceFormAction): InvoiceState => {
@@ -297,7 +319,9 @@ const invoiceFormReducer = (state: InvoiceState, action: InvoiceFormAction): Inv
         // Resetear los campos específicos del tipo de factura
         provider: action.payload === 'purchase' ? state.provider : null,
         customer: action.payload === 'sale' ? state.customer : null,
-        providerInvoicePrefix: action.payload === 'purchase' ? 'FC' : 'FV'
+        providerInvoicePrefix: action.payload === 'purchase' ? 'FC' : 'FV',
+        // Al cambiar entre compra/venta, mantener por defecto FV para ventas
+        saleDocumentType: action.payload === 'sale' ? 'FV' : state.saleDocumentType
       };
     case 'ADD_ITEM':
       return { ...state, items: [...state.items, action.payload] };
@@ -344,11 +368,77 @@ const invoiceFormReducer = (state: InvoiceState, action: InvoiceFormAction): Inv
 export default function InvoiceForm() {
   const router = useRouter();
   const [state, dispatch] = useReducer(invoiceFormReducer, initialState);
+  const DEFAULT_RC_DOCS: Array<{ id: number; code: string; name: string }> = [
+    { id: 1, code: 'RC Cota', name: 'RC Cota' },
+    { id: 2, code: 'RC Envigado', name: 'RC Envigado' },
+    { id: 999, code: 'Causación Automática', name: 'Causación Automática' }
+  ];
+  const [rcDocs, setRcDocs] = useState<Array<{ id: number; code: string; name: string }>>([]);
+  const [paymentOptions, setPaymentOptions] = useState<Array<{ id: number; name: string }>>([]);
+  const [fvDocs, setFvDocs] = useState<any[]>([]);
+  const [loadingFv, setLoadingFv] = useState(false);
 // El estado de carga no se utiliza actualmente, pero se guarda para uso futuro.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Cargar tipos de documento RC y medios de pago (si hay endpoint de pagos disponible en backend)
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [docsRes] = await Promise.all([
+          fetch('/api/siigo/document-types?type=RC', { cache: 'no-store' }),
+        ]);
+        if (docsRes.ok) {
+          const docsJson = await docsRes.json();
+          const list = (docsJson?.data?.results || docsJson?.data || [])
+            .map((d: any) => ({ id: d.id, code: d.code, name: d.name }))
+            .filter((d: any) => d && d.id);
+          const finalList = (list && list.length > 0) ? list : DEFAULT_RC_DOCS;
+          setRcDocs(finalList);
+          if (!state.rcDocumentId && finalList.length > 0) {
+            dispatch({ type: 'UPDATE_FIELD', payload: { field: 'rcDocumentId', value: finalList[0].id } });
+          }
+        }
+      } catch {
+        setRcDocs(DEFAULT_RC_DOCS);
+        if (!state.rcDocumentId && DEFAULT_RC_DOCS.length > 0) {
+          dispatch({ type: 'UPDATE_FIELD', payload: { field: 'rcDocumentId', value: DEFAULT_RC_DOCS[0].id } });
+        }
+      }
+    };
+    load();
+  }, [state.rcDocumentId]);
+
+  // Cargar facturas de venta del cliente seleccionado para RC
+  useEffect(() => {
+    const loadFv = async () => {
+      if (state.invoiceType !== 'sale' || state.saleDocumentType !== 'RC' || !state.customer?.identificacion) {
+        setFvDocs([]);
+        return;
+      }
+      setLoadingFv(true);
+      try {
+        const url = '/api/siigo/documents?type=FV&page=1&pageSize=100&includeDependencies=true';
+        const res = await fetch(url, { cache: 'no-store' });
+        if (!res.ok) throw new Error('No se pudieron cargar facturas de venta');
+        const json = await res.json();
+        const list: any[] = Array.isArray(json?.data) ? json.data : [];
+        const id = state.customer.identificacion;
+        const filtered = list.filter((d: any) => {
+          const cid = d?.customer?.identification || d?.customer?.identificacion || d?.customer_id;
+          return String(cid || '').trim() === String(id).trim();
+        });
+        setFvDocs(filtered);
+      } catch {
+        setFvDocs([]);
+      } finally {
+        setLoadingFv(false);
+      }
+    };
+    loadFv();
+  }, [state.invoiceType, state.saleDocumentType, state.customer?.identificacion]);
 
   const handleAddItem = useCallback(() => {
     const newItem: InvoiceItem = {
@@ -443,29 +533,54 @@ export default function InvoiceForm() {
       errors.push('Debe seleccionar un cliente');
     }
     
-    if (!state.providerInvoiceNumber?.trim()) {
-      errors.push('El número de factura es requerido');
+    if (state.invoiceType === 'purchase') {
+      if (!state.providerInvoiceNumber?.trim()) {
+        errors.push('El número de factura es requerido');
+      }
     }
     
-    if (state.items.length === 0) {
-      errors.push('Debe agregar al menos un ítem');
+    // Validaciones específicas para venta
+    if (state.invoiceType === 'sale') {
+      if (state.saleDocumentType === 'FV') {
+        if (state.items.length === 0) {
+          errors.push('Debe agregar al menos un ítem');
+        }
+      } else if (state.saleDocumentType === 'RC') {
+        if (!state.rcDocumentId) {
+          errors.push('Debe indicar el ID del documento RC');
+        }
+        if (!state.rcItems || state.rcItems.length === 0) {
+          errors.push('Debe agregar al menos un cruce (item) en el RC');
+        } else {
+          state.rcItems.forEach((rc, idx) => {
+            if (!rc.due?.prefix?.trim()) errors.push(`RC ítem ${idx + 1}: prefijo es requerido`);
+            if (!rc.due?.consecutive || rc.due.consecutive <= 0) errors.push(`RC ítem ${idx + 1}: consecutivo debe ser > 0`);
+            if (!rc.value || rc.value <= 0) errors.push(`RC ítem ${idx + 1}: valor debe ser > 0`);
+          });
+        }
+        if (!state.rcPaymentId) {
+          errors.push('Debe indicar el método de pago (ID Siigo) para el RC');
+        }
+      }
     }
     
     // Validar items
-    state.items.forEach((item: InvoiceItem, index: number) => {
-      if (!item.code?.trim()) {
-        errors.push(`Item ${index + 1}: Código es requerido`);
-      }
-      if (!item.description?.trim()) {
-        errors.push(`Item ${index + 1}: Descripción es requerida`);
-      }
-      if (!item.quantity || item.quantity <= 0) {
-        errors.push(`Item ${index + 1}: Cantidad debe ser mayor a 0`);
-      }
-      if (item.price === undefined || item.price < 0) {
-        errors.push(`Item ${index + 1}: Precio no puede ser negativo`);
-      }
-    });
+    if (!(state.invoiceType === 'sale' && state.saleDocumentType === 'RC')) {
+      state.items.forEach((item: InvoiceItem, index: number) => {
+        if (!item.code?.trim()) {
+          errors.push(`Item ${index + 1}: Código es requerido`);
+        }
+        if (!item.description?.trim()) {
+          errors.push(`Item ${index + 1}: Descripción es requerida`);
+        }
+        if (!item.quantity || item.quantity <= 0) {
+          errors.push(`Item ${index + 1}: Cantidad debe ser mayor a 0`);
+        }
+        if (item.price === undefined || item.price < 0) {
+          errors.push(`Item ${index + 1}: Precio no puede ser negativo`);
+        }
+      });
+    }
     
     return errors;
   }, [state]);
@@ -541,9 +656,40 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
         payments: [payment]
       };
     } else {
-      // Lógica para factura de venta
+      // Lógica para venta: FV o RC
       if (!state.customer) {
         throw new Error('Se requiere un cliente para la factura de venta');
+      }
+      // RC (Recibo de Caja)
+      if (state.saleDocumentType === 'RC') {
+        const totalRc = (state.rcItems || []).reduce((s, it) => s + Number(it.value || 0), 0);
+        return {
+          document: state.rcDocumentId ? { id: Number(state.rcDocumentId) } : undefined,
+          date: fechaFormateada,
+          type: state.rcType || 'DebtPayment',
+          customer: {
+            identification: state.customer.identificacion,
+            branch_office: state.customer.branch_office ?? 0,
+          },
+          currency: {
+            code: state.currency || 'COP',
+            exchange_rate: Number(state.currencyExchangeRate || 1)
+          },
+          items: (state.rcItems || []).map(rc => ({
+            due: {
+              prefix: rc.due.prefix,
+              consecutive: Number(rc.due.consecutive),
+              ...(rc.due.quote ? { quote: Number(rc.due.quote) } : {}),
+              ...(rc.due.date ? { date: rc.due.date } : {}),
+            },
+            value: Number(rc.value)
+          })),
+          payment: {
+            id: Number(state.rcPaymentId),
+            value: totalRc
+          },
+          observations: state.observations || ''
+        } as unknown as SiigoPaymentRequest;
       }
       
       // Calcular totales
@@ -620,7 +766,9 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
       }
       // Construir el payload robusto para SIIGO
       const payload = buildSiigoPayload();
-      const endpoint = state.invoiceType === 'purchase' ? '/api/siigo/compras' : '/api/siigo/ventas';
+      const endpoint = state.invoiceType === 'purchase'
+        ? '/api/siigo/compras'
+        : (state.saleDocumentType === 'RC' ? '/api/siigo/vouchers' : '/api/siigo/ventas');
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -754,6 +902,23 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
                       tabIndex={-1}
                     />
                   </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="sale-document-type">Tipo de Documento de Venta</Label>
+                    <select
+                      id="sale-document-type"
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                      value={state.saleDocumentType}
+                      onChange={(e) => { 
+                        const val = e.target.value as 'FV' | 'RC';
+                        dispatch({ type: 'UPDATE_FIELD', payload: { field: 'saleDocumentType', value: val } });
+                        dispatch({ type: 'UPDATE_FIELD', payload: { field: 'providerInvoicePrefix', value: val } });
+                      }}
+                      required
+                    >
+                      <option value="FV">FV - Factura de Venta</option>
+                      <option value="RC">RC - Recibo de Caja</option>
+                    </select>
+                  </div>
                 </>
               )}
 
@@ -781,8 +946,7 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
                   ) : (
                     <>
                       <option value="FV">FV - Factura de Venta</option>
-                      <option value="NC">NC - Nota Crédito</option>
-                      <option value="ND">ND - Nota Débito</option>
+                      <option value="RC">RC - Recibo de Caja</option>
                     </>
                   )}
                 </select>
@@ -826,20 +990,78 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
                   </select>
                 </div>
               )}
-              <div className="space-y-2">
-                <Label htmlFor="provider-invoice-number">
-                  {state.invoiceType === 'purchase' ? 'Número de Factura' : 'Número de Factura'} *
-                </Label>
-                <Input
-                  id="provider-invoice-number"
-                  placeholder={state.invoiceType === 'purchase' ? 'Número de la factura' : 'Número de factura'}
-                  value={state.providerInvoiceNumber}
-                  onChange={(e) =>
-                    dispatch({ type: 'SET_PROVIDER_INVOICE_NUMBER', payload: e.target.value })
-                  }
-                  required
-                />
-              </div>
+              {state.invoiceType === 'sale' && state.saleDocumentType === 'RC' && (
+                <>
+                  <div className="space-y-2">
+                    <Label>Documento RC (elige la sede)</Label>
+                    <div className="flex gap-2 flex-wrap">
+                      {(rcDocs.length > 0 ? rcDocs : DEFAULT_RC_DOCS).map((d) => (
+                        <button
+                          key={d.id}
+                          type="button"
+                          onClick={() => dispatch({ type: 'UPDATE_FIELD', payload: { field: 'rcDocumentId', value: d.id } })}
+                          className={`px-3 py-2 rounded-md border text-sm ${state.rcDocumentId === d.id ? 'bg-primary text-primary-foreground' : 'bg-background'}`}
+                          aria-pressed={state.rcDocumentId === d.id}
+                        >
+                          {d.name}
+                        </button>
+                      ))}
+                    </div>
+                    {!state.rcDocumentId && (
+                      <div className="text-xs text-muted-foreground">Selecciona una sede (Cota o Envigado) para continuar.</div>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="rc-type">Tipo de RC</Label>
+                    <select
+                      id="rc-type"
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={state.rcType || 'DebtPayment'}
+                      onChange={(e) => dispatch({ type: 'UPDATE_FIELD', payload: { field: 'rcType', value: e.target.value as 'DebtPayment' | 'AdvancePayment' | 'Detailed' } })}
+                      required
+                    >
+                      <option value="DebtPayment">DebtPayment - Abono a deuda</option>
+                      <option value="AdvancePayment">AdvancePayment - Anticipo</option>
+                      <option value="Detailed">Detailed - Avanzado</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="currency">Moneda</Label>
+                    <select
+                      id="currency"
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                      value={state.currency}
+                      onChange={(e) => dispatch({ type: 'UPDATE_FIELD', payload: { field: 'currency', value: e.target.value } })}
+                    >
+                      {SIIGO_CONFIG.CURRENCIES.map((c) => (
+                        <option key={c.code} value={c.code}>{c.code}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="exchange">Tasa de Cambio</Label>
+                    <Input
+                      id="exchange"
+                      type="number"
+                      step="0.0001"
+                      value={state.currencyExchangeRate || 1}
+                      onChange={(e) => dispatch({ type: 'UPDATE_FIELD', payload: { field: 'currencyExchangeRate', value: Number(e.target.value) } })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="rc-payment-id">Forma de Pago (ID Siigo)</Label>
+                    <Input
+                      id="rc-payment-id"
+                      type="number"
+                      value={state.rcPaymentId || ''}
+                      onChange={(e) => dispatch({ type: 'UPDATE_FIELD', payload: { field: 'rcPaymentId', value: Number(e.target.value) } })}
+                      placeholder="Ej. 5636"
+                      required
+                    />
+                  </div>
+                </>
+              )}
+              {/* Campo Número de Factura oculto para todos los casos (FC/FV/RC) */}
               <div className="space-y-2">
                 <Label htmlFor="invoice-date">Fecha de Factura *</Label>
                 <Input
@@ -853,7 +1075,7 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
                   required
                 />
               </div>
-              {state.invoiceType === 'sale' && (
+              {state.invoiceType === 'sale' && state.saleDocumentType === 'FV' && (
                 <div className="space-y-2">
                   <Label htmlFor="due-date">Fecha de Vencimiento *</Label>
                   <Input
@@ -876,7 +1098,7 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle>Ítems de la Factura</CardTitle>
+              <CardTitle>{state.invoiceType === 'sale' && state.saleDocumentType === 'RC' ? 'Cruces (RC)' : 'Ítems de la Factura'}</CardTitle>
               <Button
                 type="button"
                 variant="outline"
@@ -885,12 +1107,16 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
                 disabled={isSubmitting}
               >
                 <Plus className="h-4 w-4 mr-2" />
-                Agregar Ítem
+                {state.invoiceType === 'sale' && state.saleDocumentType === 'RC' ? 'Agregar Ítem (FV para cruce)' : 'Agregar Ítem'}
               </Button>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            {state.items.length === 0 ? (
+            {state.invoiceType === 'sale' && state.saleDocumentType === 'RC' ? (
+              <div className="text-sm text-muted-foreground">
+                Agregue los cruces de facturas en la sección inferior dedicada a RC.
+              </div>
+            ) : state.items.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
                 <p>No hay ítems en la factura</p>
                 <Button
@@ -926,6 +1152,138 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
             )}
           </CardContent>
         </Card>
+
+        {/* Sección específica RC */}
+        {state.invoiceType === 'sale' && state.saleDocumentType === 'RC' && (
+          <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>Recibo de Caja - Cruce de Facturas</CardTitle>
+              <div className="text-xs text-muted-foreground">
+                Cliente: {state.customer?.name?.[0] || state.customer?.nombre || '-'} · ID: {state.customer?.identificacion || '-'}
+              </div>
+            </div>
+          </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="text-sm text-muted-foreground">
+                Ingrese las facturas a cruzar (prefijo y consecutivo) y el valor a abonar.
+              </div>
+            {/* Selección múltiple de facturas para cruzar */}
+            <div className="space-y-2">
+              <Label>Seleccionar facturas del cliente (múltiple)</Label>
+              <select
+                multiple
+                className="w-full min-h-28 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={(state.rcItems || []).map((rc) => `${rc.due.prefix || ''}-${rc.due.consecutive || ''}`)}
+                onChange={(e) => {
+                  const values = Array.from(e.currentTarget.selectedOptions).map((o) => o.value);
+                  const selectedDocs = fvDocs.filter((d: any) => {
+                    const prefix = d?.prefix || d?.prefijo || 'FV-1';
+                    const consecutive = d?.consecutive || d?.numero || d?.number || 0;
+                    return values.includes(`${prefix}-${consecutive}`);
+                  });
+                  // Mantener valores existentes para facturas ya seleccionadas
+                  const existing = (state.rcItems || []);
+                  const next = selectedDocs.map((d: any) => {
+                    const prefix = d?.prefix || d?.prefijo || 'FV-1';
+                    const consecutive = Number(d?.consecutive || d?.numero || d?.number || 0);
+                    const quote = Number(d?.quote || d?.cuota || 1);
+                    const date = d?.date || d?.fecha || '';
+                    const key = `${prefix}-${consecutive}`;
+                    const prev = existing.find((rc) => `${rc.due.prefix}-${rc.due.consecutive}` === key);
+                    return prev || { due: { prefix, consecutive, quote, date }, value: 0 };
+                  });
+                  dispatch({ type: 'UPDATE_FIELD', payload: { field: 'rcItems', value: next as unknown as never } });
+                }}
+              >
+                {fvDocs.map((d: any, i: number) => {
+                  const prefix = d?.prefix || d?.prefijo || 'FV-1';
+                  const consecutive = d?.consecutive || d?.numero || d?.number || 0;
+                  const fecha = d?.date || d?.fecha || '';
+                  const name = d?.customer?.name || d?.customer?.nombre || '';
+                  const saldo = d?.balance ?? d?.saldo ?? '';
+                  return (
+                    <option key={`${prefix}-${consecutive}-${i}`} value={`${prefix}-${consecutive}`}>{`${prefix}-${consecutive}`} {name ? ` - ${name}` : ''} {fecha ? ` - ${fecha}` : ''} {saldo !== '' ? ` - Saldo: ${saldo}` : ''}</option>
+                  );
+                })}
+              </select>
+              <div className="text-xs text-muted-foreground">Mantén Ctrl/Cmd para seleccionar varias.</div>
+            </div>
+              {(state.rcItems || []).map((rc, idx) => (
+                <div key={idx} className="grid grid-cols-1 md:grid-cols-3 gap-3 border rounded-md p-3">
+                  <div className="space-y-2 md:col-span-2">
+                    <Label>Factura a cruzar</Label>
+                    <select
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={`${rc.due.prefix || ''}-${rc.due.consecutive || ''}`}
+                      onChange={(e) => {
+                        const found = fvDocs.find((d: any) => {
+                          const prefix = d?.prefix || d?.prefijo || 'FV-1';
+                          const consecutive = d?.consecutive || d?.numero || d?.number || 0;
+                          return `${prefix}-${consecutive}` === e.target.value;
+                        });
+                        if (!found) return;
+                        const next = [...(state.rcItems || [])];
+                        const prefix = found?.prefix || found?.prefijo || 'FV-1';
+                        const consecutive = Number(found?.consecutive || found?.numero || found?.number || 0);
+                        const quote = Number(found?.quote || found?.cuota || 1);
+                        const date = found?.date || found?.fecha || '';
+                        next[idx] = { ...rc, due: { prefix, consecutive, quote, date } };
+                        dispatch({ type: 'UPDATE_FIELD', payload: { field: 'rcItems', value: next as unknown as never } });
+                      }}
+                    >
+                      <option value="">{loadingFv ? 'Cargando facturas...' : 'Seleccione una factura'}</option>
+                      {fvDocs.map((d: any, i: number) => {
+                        const prefix = d?.prefix || d?.prefijo || 'FV-1';
+                        const consecutive = d?.consecutive || d?.numero || d?.number || 0;
+                        const fecha = d?.date || d?.fecha || '';
+                        const name = d?.customer?.name || d?.customer?.nombre || '';
+                        const saldo = d?.balance ?? d?.saldo ?? '';
+                        return (
+                          <option key={`${prefix}-${consecutive}-${i}`} value={`${prefix}-${consecutive}`}>{`${prefix}-${consecutive}`} {name ? ` - ${name}` : ''} {fecha ? ` - ${fecha}` : ''} {saldo !== '' ? ` - Saldo: ${saldo}` : ''}</option>
+                        );
+                      })}
+                    </select>
+                    {/* Resumen de la FV seleccionada (solo lectura) */}
+                    {rc.due?.prefix && rc.due?.consecutive ? (
+                      <div className="text-xs text-muted-foreground">
+                        Aplicando a: <span className="font-medium">{rc.due.prefix}-{rc.due.consecutive}</span>
+                        {rc.due.date ? ` · Fecha: ${rc.due.date}` : ''}
+                        {typeof rc.due.quote !== 'undefined' ? ` · Cuota: ${rc.due.quote}` : ''}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Valor a abonar</Label>
+                    <Input
+                      type="number"
+                      value={rc.value}
+                      onChange={(e) => {
+                        const next = [...(state.rcItems || [])];
+                        next[idx] = { ...rc, value: Number(e.target.value) };
+                        dispatch({ type: 'UPDATE_FIELD', payload: { field: 'rcItems', value: next as unknown as never } });
+                      }}
+                      placeholder="119000"
+                    />
+                  </div>
+                </div>
+              ))}
+              <div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    const next = [...(state.rcItems || [])];
+                    next.push({ due: { prefix: 'FV-1', consecutive: 0 }, value: 0 });
+                    dispatch({ type: 'UPDATE_FIELD', payload: { field: 'rcItems', value: next as unknown as never } });
+                  }}
+                >
+                  <Plus className="h-4 w-4 mr-2" /> Agregar cruce
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Totales */}
         <Card>
@@ -998,7 +1356,7 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
             disabled={isSubmitting || state.items.length === 0}
           >
             <Send className="mr-2 h-4 w-4" />
-            {isSubmitting ? 'Enviando a Siigo...' : `Enviar Factura de ${state.invoiceType === 'purchase' ? 'Compra' : 'Venta'} a Siigo`}
+            {isSubmitting ? 'Enviando a Siigo...' : state.invoiceType === 'purchase' ? 'Enviar Factura de Compra a Siigo' : (state.saleDocumentType === 'RC' ? 'Enviar RC a Siigo' : 'Enviar Factura de Venta a Siigo')}
           </Button>
         </div>
       </form>
