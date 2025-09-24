@@ -35,9 +35,13 @@ export async function POST(request: NextRequest) {
     // Endpoint para crear facturas de compra en Siigo
     const endpoint = process.env.SIIGO_PURCHASES_CREATE_URL || 'purchases';
     
+    console.log('Enviando factura a Siigo:', JSON.stringify(body, null, 2));
+    
     const result = await withSiigoAuth(async (token) => {
       const baseUrl = process.env.SIIGO_BASE_URL || 'https://api.siigo.com/v1';
       const url = `${baseUrl}/${endpoint}`;
+      
+      console.log('URL de la API de Siigo:', url);
       
       const response = await fetch(url, {
         method: 'POST',
@@ -49,21 +53,71 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify(body)
       });
       
+      const responseText = await response.text();
+      let responseData;
+      
+      try {
+        responseData = responseText ? JSON.parse(responseText) : {};
+      } catch (e) {
+        console.error('Error al parsear la respuesta de Siigo:', e);
+        responseData = { rawResponse: responseText };
+      }
+      
+      console.log('Respuesta de Siigo:', {
+        status: response.status,
+        statusText: response.statusText,
+        data: responseData
+      });
+      
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
+        console.error('Error en la API de Siigo:', response.status, responseData);
         return {
-          error: errorData.message || 'Error al crear la factura de compra en Siigo',
+          error: responseData.message || `Error al crear la factura en Siigo (${response.status})`,
           status: response.status,
-          details: errorData
+          details: responseData,
+          data: null
         };
       }
       
-      return await response.json();
+      // Verificar que la respuesta contenga datos válidos
+      if (!responseData || (typeof responseData === 'object' && Object.keys(responseData).length === 0)) {
+        console.error('Respuesta vacía o inválida de Siigo');
+        return {
+          error: 'La respuesta de Siigo está vacía o es inválida',
+          status: 500,
+          details: responseData,
+          data: null
+        };
+      }
+      
+      return { data: responseData, error: null };
     });
     
+    // Si hay un error en la respuesta de Siigo
     if (result.error) {
+      // Extraer detalles de error de manera segura
+      const errorDetails = (result as any).details as any; // Usamos 'as any' temporalmente
+      console.error('Error al crear factura en Siigo:', result.error, errorDetails);
+      
+      // Crear objeto de respuesta de error
+      const errorResponse: {
+        success: boolean;
+        error: any;
+        details?: any;
+        type: string;
+      } = {
+        success: false,
+        error: result.error,
+        type: 'SIIGO_API_ERROR'
+      };
+      
+      // Añadir detalles si existen
+      if (errorDetails) {
+        errorResponse.details = errorDetails;
+      }
+      
       return NextResponse.json(
-        { success: false, error: result.error, details: result.details },
+        errorResponse,
         { status: result.status || 500 }
       );
     }
@@ -72,7 +126,7 @@ export async function POST(request: NextRequest) {
       success: true,
       data: result.data || result,
       message: 'Factura de compra creada exitosamente'
-    });
+    }, { status: 201 });
   } catch (error) {
     console.error('Error al procesar la solicitud:', error);
     return NextResponse.json(

@@ -626,28 +626,31 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
       // Payload para factura de compra
       return {
         document: {
-          id: 27524 // ID del tipo de documento en Siigo para factura de compra (según configuración de Siigo)
+          id: SIIGO_CONFIG.DOCUMENT_TYPES.PURCHASE_INVOICE, // Usar el ID de la configuración
+          prefix: 'FC' // Forzar el prefijo FC
         },
         date: fechaFormateada,
         supplier: {
-          identification: String(codigoProveedor), // Corregido: 'identification' en lugar de 'identificacion'
-          branch_office: branchOffice
+          identification: String(codigoProveedor) // Solo incluir identification, sin branch_office
         },
-        cost_center: Number(state.costCenter), // Convertido a número según la documentación
+        // No incluir cost_center ya que no es obligatorio
         provider_invoice: {
           prefix: state.providerInvoicePrefix || "FC",
           number: state.providerInvoiceNumber || "1", // Aseguramos que siempre haya un número
           ...(state.cufe && { cufe: state.cufe })
         },
-        currency: {
-          code: state.currency || "COP", // Formato correcto según documentación
-          exchange_rate: 1
-        },
+        // No incluir currency cuando es la moneda local (COP)
+        ...(state.currency && state.currency !== 'COP' ? {
+          currency: {
+            code: state.currency,
+            exchange_rate: Number(state.currencyExchangeRate || 1)
+          }
+        } : {}),
         discount_type: "Value",
         supplier_by_item: false,
         tax_included: false,
         observations: state.observations || "",
-        items,
+        items: items || [], // Asegurar que items siempre esté presente
         payments
       };
     } else {
@@ -725,10 +728,13 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
           // Nota: Asegúrate de que estos campos coincidan con lo que espera la API de Siigo
         },
         seller: state.seller || 1,
-        currency: {
-          code: state.currency || 'COP',
-          exchange_rate: 1 // Tasa de cambio por defecto
-        },
+        // No incluir currency cuando es la moneda local (COP)
+        ...(state.currency && state.currency !== 'COP' ? {
+          currency: {
+            code: state.currency,
+            exchange_rate: Number(state.currencyExchangeRate || 1)
+          }
+        } : {}),
         stamp: state.stamp || { send: true },
         mail: state.mail || { send: true },
         observations: state.observations || "",
