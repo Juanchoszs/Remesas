@@ -600,56 +600,55 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
     const items = state.items.map((item: InvoiceItem) => {
       const itemSubtotal = (item.quantity || 0) * (item.price || 0);
       const discount = item.discount?.value || 0;
-      const taxableAmount = itemSubtotal - discount;
       
       return {
-        type: mapItemTypeToSiigoType(item.type),
+        type: mapItemTypeToSiigoType(item.type), // Esto devuelve 'Product', 'Service' o 'FixedAsset'
         code: item.code,
         description: item.description || item.code,
         quantity: Number(item.quantity) || 1,
         price: Number(item.price) || 0,
         discount: discount,
         taxes: item.hasIVA ? [{
-          id: 18384, // ID del impuesto IVA
-          tax_base: taxableAmount,
-          type: "IVA"
-        }] : [],
-        warehouse: item.warehouse || '1'
+          id: 18384 // ID del impuesto IVA configurado en Siigo
+        }] : []
       };
     });
 
     const total = calculateTotal(state.items, state.ivaPercentage);
 
-    const payment: SiigoPaymentRequest & { name: string } = {
-      id: 8467, // ID real del método de pago, ajusta según tu configuración
+    const payments = [{
+      id: 8467, // ID del método de pago configurado en Siigo
       name: "OTROS",
       value: total,
       due_date: fechaFormateada
-    };
+    }];
 
       // Payload para factura de compra
       return {
         document: {
-          id: 27524, // ID del tipo de documento en Siigo para factura de compra
+          id: 27524 // ID del tipo de documento en Siigo para factura de compra (según configuración de Siigo)
         },
         date: fechaFormateada,
         supplier: {
-          identificacion: String(codigoProveedor),
+          identification: String(codigoProveedor), // Corregido: 'identification' en lugar de 'identificacion'
           branch_office: branchOffice
         },
-        cost_center: state.costCenter,
+        cost_center: Number(state.costCenter), // Convertido a número según la documentación
         provider_invoice: {
           prefix: state.providerInvoicePrefix || "FC",
-          number: state.providerInvoiceNumber ? String(Number(state.providerInvoiceNumber)) : null,
+          number: state.providerInvoiceNumber || "1", // Aseguramos que siempre haya un número
           ...(state.cufe && { cufe: state.cufe })
         },
-        currency: state.currency,
+        currency: {
+          code: state.currency || "COP", // Formato correcto según documentación
+          exchange_rate: 1
+        },
         discount_type: "Value",
         supplier_by_item: false,
         tax_included: false,
         observations: state.observations || "",
         items,
-        payments: [payment]
+        payments
       };
     } else {
       // Lógica para venta: FV o RC
