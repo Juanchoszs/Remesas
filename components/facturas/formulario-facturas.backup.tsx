@@ -21,19 +21,12 @@ import {
 
 // Constantes de configuración para Siigo
 const SIIGO_CONFIG = {
-  // Tipos de documentos - Configurados según la instancia de Siigo
-  // Usando los IDs reales de la API de Siigo (no los códigos)
+  // Tipos de documentos
   DOCUMENT_TYPES: {
-    // Documentos de Compra
-    PURCHASE_INVOICE: 7291,              // Compra estándar (ID: 7291)
-    PURCHASE_MANIFESTO_COTA: 27524,      // Manifiestos Cota (ID: 27524)
-    PURCHASE_MANIFESTO_ENVIGADO: 27525,  // Manifiestos Envigado (ID: 27525)
-    PURCHASE_SUJETOS_NO_OBLIGADOS: 29510, // Compras a sujetos no obligados (ID: 29510)
-    
-    // Documentos de Venta (actualizar con los IDs correctos cuando los tengas)
-    SALE_INVOICE: 2,     // Factura de venta - Actualizar con el ID correcto
-    CREDIT_NOTE: 3,      // Nota crédito - Actualizar con el ID correcto
-    DEBIT_NOTE: 4        // Nota débito - Actualizar con el ID correcto
+    PURCHASE_INVOICE: 24445, // Factura de compra
+    SALE_INVOICE: 24446,    // Factura de venta
+    CREDIT_NOTE: 24447,     // Nota crédito
+    DEBIT_NOTE: 24448       // Nota débito
   },
   
   // Tipos de identificación
@@ -254,12 +247,38 @@ type InvoiceFormAction =
 
 // El tipo facturas formlario se define arriba 
 
-import { calculateSubtotal, calculateIVA, mapItemTypeToSiigoType } from './buildSiigoPayload';
+// Funcion utilmem reduct
+const calculateSubtotal = (items: InvoiceItem[]): number => {
+  return items.reduce((sum, item) => {
+    const itemSubtotal = (item.quantity || 0) * (item.price || 0);
+    const discount = item.discount?.value || 0;
+    return sum + (itemSubtotal - discount);
+  }, 0);
+};
+
+const calculateIVA = (items: InvoiceItem[], ivaPercentage: number): number => {
+  return items.reduce((sum, item) => {
+    if (!item.hasIVA) return sum;
+    const itemSubtotal = (item.quantity || 0) * (item.price || 0);
+    const discount = item.discount?.value || 0;
+    const taxableAmount = itemSubtotal - discount;
+    return sum + (taxableAmount * (ivaPercentage / 100));
+  }, 0);
+};
 
 const calculateTotal = (items: InvoiceItem[], ivaPercentage: number): number => {
   const subtotal = calculateSubtotal(items);
   const iva = calculateIVA(items, ivaPercentage);
   return subtotal + iva;
+};
+
+const mapItemTypeToSiigoType = (type: string = 'product'): 'Product' | 'Service' | 'FixedAsset' => {
+  switch (type) {
+    case 'product': return 'Product';
+    case 'service': return 'Service';
+    case 'fixed-asset': return 'FixedAsset';
+    default: return 'Product';
+  }
 };
 
 // incializar el estado
