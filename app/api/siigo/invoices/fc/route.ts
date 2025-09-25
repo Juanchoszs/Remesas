@@ -54,6 +54,7 @@ export async function POST(request: NextRequest) {
         ...( (body as any).provider_invoice.number !== undefined ? { number: String((body as any).provider_invoice.number) } : {} ),
       } : undefined;
 
+      const includePayments = Boolean((body as any)?.include_payments);
       const payments = Array.isArray((body as any)?.payments)
         ? (body as any).payments.map((p: any) => ({
             id: Number(p.id),
@@ -104,7 +105,7 @@ export async function POST(request: NextRequest) {
         ...( typeof (body as any)?.supplier_by_item === 'boolean' ? { supplier_by_item: (body as any).supplier_by_item } : { supplier_by_item: false } ),
         ...( typeof (body as any)?.tax_included === 'boolean' ? { tax_included: (body as any).tax_included } : { tax_included: false } ),
         items,
-        payments
+        ...(includePayments ? { payments } : {})
       };
 
       // Preflight: si no vino number en el cuerpo, decidir según configuración del comprobante
@@ -188,6 +189,40 @@ export async function POST(request: NextRequest) {
 
       if (finalNumber !== undefined) {
         payload.number = finalNumber;
+      }
+      
+      // Preflight: ajustar payments sólo si se solicitó registrar pagos (para evitar crear RP en pruebas de FC)
+      if (includePayments) {
+        try {
+          const discountType = String(payload.discount_type || 'Value');
+          let totalPurchase = 0;
+          for (const it of (payload.items || [])) {
+            const qty = Number(it.quantity || 0);
+            const price = Number(it.price || 0);
+            let base = qty * price;
+            // Descuento por ítem
+            const rawDisc = Number(it.discount || 0);
+            let disc = rawDisc;
+            if (discountType === 'Percentage') {
+              disc = base * (rawDisc / 100);
+            }
+            base = Math.max(0, base - disc);
+            // En compras, Siigo valida payments contra el total de compra sin impuestos
+            totalPurchase += base;
+          }
+          totalPurchase = Math.round(totalPurchase * 100) / 100;
+          const currentPaymentsTotal = Math.round(((payload.payments || []).reduce((s: number, p: any) => s + Number(p.value || 0), 0)) * 100) / 100;
+          if (totalPurchase !== currentPaymentsTotal) {
+            const firstPayment = (payload.payments && payload.payments[0]) || {};
+            payload.payments = [{
+              id: Number(firstPayment.id || 8467),
+              value: totalPurchase,
+              due_date: firstPayment.due_date || payload.date
+            }];
+          }
+        } catch (e) {
+          console.warn('Preflight: no se pudo ajustar payments automáticamente (total sin impuestos):', e);
+        }
       }
       
       console.log('URL de la API de Siigo:', url);
