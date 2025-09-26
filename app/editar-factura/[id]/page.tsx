@@ -1,11 +1,20 @@
 import { Suspense } from 'react';
 import EditorClient from './EditorClient';
 
-export default function Page({ params, searchParams }: { params: { id: string }, searchParams: Record<string, string | string[] | undefined> }) {
-  const id = params.id;
-  const type = (searchParams?.type as string) || 'FC';
+export default async function Page(
+  {
+    params,
+    searchParams,
+  }: {
+    params: Promise<{ id: string }>;
+    searchParams: Promise<Record<string, string | string[] | undefined>>;
+  }
+) {
+  const { id } = await params;
+  const sp = await searchParams;
+  const type = (sp?.type as string) || 'FC';
   return (
-    <Suspense>
+    <Suspense fallback={null}>
       <EditorClient id={id} type={type} />
     </Suspense>
   );

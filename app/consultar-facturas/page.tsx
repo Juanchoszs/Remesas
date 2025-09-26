@@ -1230,14 +1230,14 @@ function ClientSideConsultarFacturas() {
                     
                     <div className="divide-y">
                       {selectedInvoice.items?.length ? (
-                        selectedInvoice.items.map((item: any) => {
+                        selectedInvoice.items.map((item: any, idx: number) => {
                           const isDebit = item.account?.movement === 'Debit';
                           const isCredit = item.account?.movement === 'Credit';
                           const movementColor = isDebit ? 'text-red-600' : isCredit ? 'text-green-600' : 'text-gray-600';
                           const movementText = isDebit ? 'Débito' : isCredit ? 'Crédito' : 'N/A';
                           
                           return (
-                            <div key={item.id} className="px-4 py-3 hover:bg-gray-50">
+                            <div key={`${item.id ?? 'item'}-${idx}`} className="px-4 py-3 hover:bg-gray-50">
                               <div className="grid grid-cols-12 gap-4 items-center">
                                 <div className="col-span-4">
                                   <div className="font-medium">{item.description || 'Sin descripción'}</div>

@@ -80,12 +80,19 @@ export default function EditorClient({ id, type }: { id: string; type: string })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data?.success === false) {
-        throw new Error(data?.error || 'Error actualizando la factura en Siigo');
+        const details = (data && (data.details || data.Errors || data.errors)) || null;
+        const detailsMsg = details
+          ? Array.isArray(details)
+            ? details.map((d: any) => `${d.Code || d.code || ''} ${d.Message || d.message || ''}`.trim()).filter(Boolean).join(' | ')
+            : JSON.stringify(details)
+          : '';
+        const msg = [data?.error || 'Error actualizando la factura en Siigo', detailsMsg].filter(Boolean).join(' — ');
+        throw new Error(msg);
       }
       toast.success('Factura actualizada correctamente');
       router.push('/consultar-facturas');
     } catch (e: any) {
-      console.error(e);
+      console.error('[EditorClient][PUT] Error:', e);
       toast.error(e?.message || 'Error al actualizar');
       setError(e?.message || 'Error al actualizar');
     } finally {

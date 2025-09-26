@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -53,6 +53,9 @@ export default function InvoiceEditor({ value, onChange, onSave, onDelete, onCan
     })),
   }));
 
+  const [errors, setErrors] = useState<string[]>([]);
+  const [valid, setValid] = useState<boolean>(true);
+
   const totals = useMemo(() => {
     const subtotal = (local.items || []).reduce((sum, it) => sum + (Number(it.quantity) * Number(it.price)), 0);
     return { subtotal, total: subtotal };
@@ -80,8 +83,37 @@ export default function InvoiceEditor({ value, onChange, onSave, onDelete, onCan
     setField('items', items);
   };
 
+  // Live validation
+  useEffect(() => {
+    const errs: string[] = [];
+    if (!local.date) errs.push('La fecha es requerida');
+    const items = local.items || [];
+    if (items.length === 0) errs.push('Debe agregar al menos un ítem');
+    items.forEach((it, idx) => {
+      if (!it.code || !String(it.code).trim()) errs.push(`Ítem ${idx + 1}: Código es requerido`);
+      if (Number(it.quantity) <= 0) errs.push(`Ítem ${idx + 1}: Cantidad debe ser mayor a 0`);
+      if (Number(it.price) < 0) errs.push(`Ítem ${idx + 1}: Precio no puede ser negativo`);
+    });
+    setErrors(errs);
+    setValid(errs.length === 0);
+  }, [local]);
+
   return (
     <div className="space-y-6">
+      {errors.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-red-600">Validación</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="list-disc pl-5 text-sm text-red-600 space-y-1">
+              {errors.map((e, i) => (
+                <li key={i}>{e}</li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
       <Card>
         <CardHeader>
           <CardTitle>Encabezado</CardTitle>
@@ -89,19 +121,19 @@ export default function InvoiceEditor({ value, onChange, onSave, onDelete, onCan
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="date">Fecha</Label>
-            <Input id="date" type="date" value={local.date || ''} onChange={(e) => setField('date', e.target.value)} />
+            <Input id="date" type="date" value={local.date || ''} onChange={(e) => setField('date', e.target.value)} disabled={!!saving} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="observations">Observaciones</Label>
-            <Input id="observations" value={local.observations || ''} onChange={(e) => setField('observations', e.target.value)} />
+            <Input id="observations" value={local.observations || ''} onChange={(e) => setField('observations', e.target.value)} disabled={!!saving} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="pfx">Prefijo Factura Proveedor</Label>
-            <Input id="pfx" value={local.provider_invoice?.prefix || ''} onChange={(e) => setField('provider_invoice', { ...(local.provider_invoice || {}), prefix: e.target.value })} />
+            <Input id="pfx" value={local.provider_invoice?.prefix || ''} onChange={(e) => setField('provider_invoice', { ...(local.provider_invoice || {}), prefix: e.target.value })} disabled={!!saving} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="num">Número Factura Proveedor</Label>
-            <Input id="num" value={local.provider_invoice?.number || ''} onChange={(e) => setField('provider_invoice', { ...(local.provider_invoice || {}), number: e.target.value })} />
+            <Input id="num" value={local.provider_invoice?.number || ''} onChange={(e) => setField('provider_invoice', { ...(local.provider_invoice || {}), number: e.target.value })} disabled={!!saving} />
           </div>
         </CardContent>
       </Card>
@@ -112,7 +144,7 @@ export default function InvoiceEditor({ value, onChange, onSave, onDelete, onCan
         </CardHeader>
         <CardContent>
           <div className="mb-3">
-            <Button variant="outline" onClick={addItem}>Agregar Ítem</Button>
+            <Button variant="outline" onClick={addItem} disabled={!!saving}>Agregar Ítem</Button>
           </div>
           <div className="border rounded-md overflow-hidden">
             <Table>
@@ -130,22 +162,22 @@ export default function InvoiceEditor({ value, onChange, onSave, onDelete, onCan
                 {(local.items || []).map((it, idx) => (
                   <TableRow key={idx}>
                     <TableCell>
-                      <Input value={it.code || ''} onChange={(e) => setItemField(idx, { code: e.target.value })} />
+                      <Input value={it.code || ''} onChange={(e) => setItemField(idx, { code: e.target.value })} disabled={!!saving} />
                     </TableCell>
                     <TableCell>
-                      <Input value={it.description || ''} onChange={(e) => setItemField(idx, { description: e.target.value })} />
+                      <Input value={it.description || ''} onChange={(e) => setItemField(idx, { description: e.target.value })} disabled={!!saving} />
                     </TableCell>
                     <TableCell className="text-right">
-                      <Input type="number" min={0} value={it.quantity} onChange={(e) => setItemField(idx, { quantity: Number(e.target.value) })} />
+                      <Input type="number" min={0} step={1} value={it.quantity} onChange={(e) => setItemField(idx, { quantity: Number(e.target.value) })} disabled={!!saving} />
                     </TableCell>
                     <TableCell className="text-right">
-                      <Input type="number" min={0} value={it.price} onChange={(e) => setItemField(idx, { price: Number(e.target.value) })} />
+                      <Input type="number" min={0} step={100} value={it.price} onChange={(e) => setItemField(idx, { price: Number(e.target.value) })} disabled={!!saving} />
                     </TableCell>
                     <TableCell className="text-right">
                       ${(Number(it.quantity) * Number(it.price)).toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" onClick={() => removeItem(idx)}>Quitar</Button>
+                      <Button variant="ghost" onClick={() => removeItem(idx)} disabled={!!saving}>Quitar</Button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -172,7 +204,9 @@ export default function InvoiceEditor({ value, onChange, onSave, onDelete, onCan
           <Button variant="destructive" onClick={() => onDelete?.()} disabled={!!saving}>Eliminar</Button>
         )}
         <Button variant="outline" onClick={onCancel} disabled={!!saving}>Cancelar</Button>
-        <Button onClick={() => onSave?.(local)} disabled={!!saving}>{saving ? 'Guardando...' : 'Guardar Cambios'}</Button>
+        <Button onClick={() => valid && onSave?.(local)} disabled={!!saving || !valid || (local.items || []).length === 0}>
+          {saving ? 'Guardando...' : 'Guardar Cambios'}
+        </Button>
       </div>
     </div>
   );

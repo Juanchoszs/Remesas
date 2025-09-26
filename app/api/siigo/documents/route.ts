@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
-import { obtenerTokenSiigo } from '@/lib/siigo/auth';
+import { obtenerTokenSiigo, SiigoAuthError } from '@/lib/siigo/auth';
 
 const SIIGO_BASE_URL = process.env.SIIGO_BASE_URL || 'https://api.siigo.com/v1';
 const PARTNER_ID = process.env.SIIGO_PARTNER_ID || 'RemesasYMensajes';
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export async function GET(request: Request) {
   try {
@@ -12,13 +14,22 @@ export async function GET(request: Request) {
     const pageSize = searchParams.get('pageSize') || '50';
     const includeDependencies = searchParams.get('includeDependencies') === 'true';
 
-    // 🔑 Obtener token
-    const token = await obtenerTokenSiigo();
-    if (!token) {
-      return NextResponse.json(
-        { error: 'No se pudo obtener el token de autenticación' },
-        { status: 401 }
-      );
+    // 🔑 Obtener token con tolerancia a 429 (rate limit)
+    let token: string;
+    try {
+      token = await obtenerTokenSiigo();
+    } catch (e) {
+      if (e instanceof SiigoAuthError) {
+        const status = (e as any)?.details?.status;
+        if (status === 429) {
+          await sleep(1200);
+          token = await obtenerTokenSiigo(true);
+        } else {
+          return NextResponse.json({ success: false, error: e.message, details: (e as any)?.details }, { status: status || 500 });
+        }
+      } else {
+        return NextResponse.json({ success: false, error: 'Error de autenticación desconocido' }, { status: 500 });
+      }
     }
 
     // 🔀 Mapear tipo de documento → endpoint
@@ -69,15 +80,29 @@ export async function GET(request: Request) {
 
     console.log('➡️ Request a Siigo:', apiUrl.toString());
 
-    const response = await fetch(apiUrl.toString(), {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'Partner-Id': PARTNER_ID,
-        'Accept': 'application/json'
-      },
-      cache: 'no-store'
-    });
+    // Llamada con reintentos ante 401/429
+    const doFetch = async (bearer: string): Promise<Response> => {
+      return fetch(apiUrl.toString(), {
+        headers: {
+          'Authorization': `Bearer ${bearer}`,
+          'Content-Type': 'application/json',
+          'Partner-Id': PARTNER_ID,
+          'Accept': 'application/json'
+        },
+        cache: 'no-store'
+      });
+    };
+
+    let response = await doFetch(token);
+    if (response.status === 401) {
+      // refrescar token y reintentar una vez
+      token = await obtenerTokenSiigo(true);
+      response = await doFetch(token);
+    } else if (response.status === 429) {
+      const retryAfter = Number(response.headers.get('retry-after') || 1);
+      await sleep((retryAfter > 0 ? retryAfter : 1) * 1000);
+      response = await doFetch(token);
+    }
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'Error desconocido');

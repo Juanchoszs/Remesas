@@ -54,7 +54,8 @@ export async function POST(request: NextRequest) {
         ...( (body as any).provider_invoice.number !== undefined ? { number: String((body as any).provider_invoice.number) } : {} ),
       } : undefined;
 
-      const includePayments = Boolean((body as any)?.include_payments);
+      // Siigo requiere el campo payments en FC. Por defecto lo incluimos, salvo que explícitamente se envíe include_payments=false
+      const includePayments = (body as any)?.include_payments !== false;
       const payments = Array.isArray((body as any)?.payments)
         ? (body as any).payments.map((p: any) => ({
             id: Number(p.id),

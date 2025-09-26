@@ -57,10 +57,11 @@ const SIIGO_CONFIG = {
     IVA_5: {
       id: 2,      // ID del impuesto de IVA 5% en Siigo
       name: 'IVA 5%',
-      percentage: 5,
+      percentage: 5,                   
+      rate: 5,
       type: 'IVA'
     },
-    IVA_0: {
+    IVA_0: { 
       id: 3,      // ID del impuesto de IVA 0% en Siigo
       name: 'IVA 0%',
       percentage: 0,
