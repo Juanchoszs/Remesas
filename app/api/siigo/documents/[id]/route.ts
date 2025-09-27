@@ -45,7 +45,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
 
     const doFetch = async (bearer: string): Promise<Response> => fetch(urlObj.toString(), {
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${bearer}`,
         'Content-Type': 'application/json',
         'Partner-Id': PARTNER_ID,
         Accept: 'application/json',
@@ -185,15 +185,16 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
       totalPurchase = Math.round(totalPurchase * 100) / 100;
 
       // 4) Payments (obligatorio para FC)
-      const existingPaymentId = Number(
+      const existingPaymentIdRaw =
         (Array.isArray(normalizedBody.payments) && normalizedBody.payments[0]?.id) ??
         (Array.isArray(current?.payments) && current.payments[0]?.id) ??
-        8467
-      );
+        8467;
+      const existingPaymentId = Number(existingPaymentIdRaw);
+      const paymentIdFinal = Number.isFinite(existingPaymentId) && existingPaymentId > 0 ? existingPaymentId : 8467;
       const effDate = String(normalizedBody.date || current?.date || new Date().toISOString().slice(0, 10));
       const payments = [
         {
-          id: existingPaymentId,
+          id: paymentIdFinal,
           value: totalPurchase,
           due_date: (Array.isArray(normalizedBody.payments) && normalizedBody.payments[0]?.due_date) || effDate,
         },
@@ -201,13 +202,22 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
 
       // 5) Document type id obligatorio
       const documentId = Number(normalizedBody?.document?.id ?? current?.document?.id);
+      if (!Number.isFinite(documentId) || documentId <= 0) {
+        return NextResponse.json({ success: false, error: 'Documento (document.id) inválido o no determinado para FC' }, { status: 400 });
+      }
 
-      // 6) Proveedor obligatorio (desde el documento actual)
+      //  6) Proveedor obligatorio (desde el documento actual)
       const supplier = normalizedBody?.supplier ?? (current?.supplier
-        ? {
-            identification: String(current.supplier.identification || current.supplier.identificacion || ''),
-            branch_office: Number(current.supplier.branch_office ?? 0),
-          }
+        ? (() => {
+            const identification = String(current.supplier.identification || current.supplier.identificacion || '');
+            const branchOfficeNum = Number(current.supplier.branch_office);
+            const base: any = { identification };
+            // Solo incluir branch_office si es un número válido y > 0
+            if (Number.isFinite(branchOfficeNum) && branchOfficeNum > 0) {
+              base.branch_office = branchOfficeNum;
+            }
+            return base;
+          })()
         : undefined);
 
       if (!supplier || !supplier.identification) {
@@ -227,7 +237,11 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
         document: { id: documentId },
         date: effDate,
         supplier,
-        ...(cost_center !== undefined ? { cost_center: Number(cost_center) } : {}),
+        // Incluir cost_center solo si es un número válido y > 0
+        ...((() => {
+          const cc = Number(cost_center);
+          return Number.isFinite(cc) && cc > 0 ? { cost_center: cc } : {};
+        })()),
         ...(provider_invoice ? { provider_invoice: { prefix: String(provider_invoice.prefix || ''), number: String(provider_invoice.number || '') } } : {}),
         ...(currency ? { currency } : {}),
         observations: normalizedBody.observations ?? current?.observations ?? '',
@@ -250,7 +264,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
       body: JSON.stringify(payload),
     });
 
-    let res = await doFetch(token, requestBody);
+       let res = await doFetch(token, requestBody);
     if (res.status === 401) {
       token = await obtenerTokenSiigo(true);
       res = await doFetch(token, requestBody);
