@@ -210,11 +210,17 @@ const FCRow = ({ invoice, onView }: { invoice: Invoice, onView: () => void }) =>
       <TableCell className="text-right">
         <div className="flex flex-col items-end">
           <span className="font-semibold">
-            {`$${Math.round(Number(invoice.total)).toLocaleString('es-CO')}`}
+            {`$${Math.round(Number(invoice.total || 0)).toLocaleString('es-CO', {
+              minimumFractionDigits: 0,
+              maximumFractionDigits: 0
+            })}`}
           </span>
-          {invoice.balance !== undefined && invoice.balance > 0 && (
+          {invoice.balance !== undefined && Number(invoice.balance) > 0 && (
             <span className="text-xs text-muted-foreground">
-              Saldo: {`$${Math.round(Number(invoice.balance)).toLocaleString('es-CO')}`}
+              Saldo: {`$${Math.round(Number(invoice.balance || 0)).toLocaleString('es-CO', {
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0
+              })}`}
             </span>
           )}
         </div>
@@ -222,7 +228,12 @@ const FCRow = ({ invoice, onView }: { invoice: Invoice, onView: () => void }) =>
       <TableCell className="text-center">
         <Tooltip>
           <TooltipTrigger asChild>
-            <Badge variant={statusInfo.variant} className="whitespace-nowrap cursor-help">
+            <Badge 
+              variant={['default', 'destructive', 'outline', 'secondary'].includes(statusInfo.variant) 
+                ? statusInfo.variant as 'default' | 'destructive' | 'outline' | 'secondary' 
+                : 'default'}
+              className="whitespace-nowrap cursor-help"
+            >
               {statusInfo.text}
             </Badge>
           </TooltipTrigger>
@@ -234,11 +245,37 @@ const FCRow = ({ invoice, onView }: { invoice: Invoice, onView: () => void }) =>
               {invoice.status === 'cancelled' && 'Documento anulado'}
               {!['paid', 'partially_paid', 'draft', 'cancelled'].includes(invoice.status) && `Estado: ${invoice.status}`}
             </p>
-            {invoice.metadata?.created && (
-              <p className="text-xs text-muted-foreground mt-1">
-                Última actualización: {new Date(invoice.metadata.created).toLocaleString('es-CO')}
-              </p>
-            )}
+            {(() => {
+              try {
+                const dateString = invoice.metadata?.created;
+                if (!dateString) return null;
+                
+                // Asegurarse de que dateString sea un string
+                const dateStr = String(dateString);
+                if (!dateStr) return null;
+                
+                const timestamp = Date.parse(dateStr);
+                if (isNaN(timestamp)) return null;
+                
+                const date = new Date(timestamp);
+                if (isNaN(date.getTime())) return null;
+                
+                return (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Última actualización: {date.toLocaleString('es-CO', {
+                      year: 'numeric',
+                      month: '2-digit',
+                      day: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                  </p>
+                );
+              } catch (error) {
+                console.error('Error al formatear la fecha:', error);
+                return null;
+              }
+            })()}
           </TooltipContent>
         </Tooltip>
       </TableCell>
@@ -1689,12 +1726,39 @@ function ClientSideConsultarFacturas() {
                           </div>
                         )}
                         
-                        {selectedInvoice.metadata?.created && (
-                          <div className="border rounded-lg p-3">
-                            <p className="font-medium">Fecha de Creación:</p>
-                            <p className="text-muted-foreground">{new Date(selectedInvoice.metadata.created).toLocaleString('es-CO', {dateStyle: 'medium', timeStyle: 'short'})}</p>
-                          </div>
-                        )}
+                        {(() => {
+                          try {
+                            const dateString = selectedInvoice.metadata?.created;
+                            if (!dateString || typeof dateString !== 'string') return null;
+                            
+                            const timestamp = Date.parse(dateString);
+                            if (isNaN(timestamp)) return null;
+                            
+                            const date = new Date(timestamp);
+                            if (isNaN(date.getTime())) return null;
+                            
+                            const options: Intl.DateTimeFormatOptions = {
+                              year: 'numeric',
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              hour12: true
+                            };
+                            
+                            return (
+                              <div className="border rounded-lg p-3">
+                                <p className="font-medium">Fecha de Creación:</p>
+                                <p className="text-muted-foreground">
+                                  {date.toLocaleString('es-ES', options)}
+                                </p>
+                              </div>
+                            );
+                          } catch (error) {
+                            console.error('Error al formatear la fecha:', error);
+                            return null;
+                          }
+                        })()}
                       </div>
                     </div>
 
@@ -1714,14 +1778,13 @@ function ClientSideConsultarFacturas() {
                               </div>
                             )}
                             
-                            {selectedInvoice.items?.length > 0 && selectedInvoice.items.map((item: any, idx: number) => (
-
+                            {(selectedInvoice.items || [])?.map((item: InvoiceItem, idx: number) => (
                               <div key={`due-${idx}`} className="flex justify-between py-1">
                                 <span>
                                   Factura: {item.due?.prefix || ''} {item.due?.consecutive || ''}
                                   {item.due?.date && <span className="text-xs text-muted-foreground ml-2">({new Date(item.due.date).toLocaleDateString('es-CO')})</span>}
                                 </span>
-                                <span className="whitespace-nowrap">${Number(item.value || 0).toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
+                                <span className="whitespace-nowrap">${Number(item.total || 0).toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
                               </div>
                             ))}
                             
