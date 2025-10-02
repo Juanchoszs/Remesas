@@ -32,7 +32,7 @@ const formatCurrency = (value: number) => {
 export default function AnalyticsPage() {
   const [activeTab, setActiveTab] = useState('historial');
   const [documentType, setDocumentType] = useState<DocumentType>('FC');
-  const [timeRange, setTimeRange] = useState<'month' | 'quarter' | 'year'>('month');
+  const [timeRange, _setTimeRange] = useState<'month' | 'quarter' | 'year'>('month');
   const [isLoading, setIsLoading] = useState(true);
   type ProcessedData = { months: string[]; values: number[]; total: number };
   const [chartData, setChartData] = useState<Record<DocumentType, ProcessedData | undefined>>({
