@@ -10,7 +10,7 @@ interface FilaBaseDatos {
   cantidad: number;
 }
 
-interface DatosGrafico {
+interface _DatosGrafico {
   etiquetas: string[];
   conjuntosDatos: Array<{
     etiqueta: string;

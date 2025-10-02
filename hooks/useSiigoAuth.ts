@@ -1,10 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
-interface SiigoToken {
-  access_token: string;
-  expires_in: number;
-  token_type: string;
-}
+// Interface removed as it's not used in this hook
 
 export function useSiigoAuth() {
   const [token, setToken] = useState<string | null>(null);
@@ -42,7 +38,7 @@ export function useSiigoAuth() {
   };
 
   // Function to make authenticated requests
-  const fetchWithAuth = async (url: string, options: RequestInit = {}): Promise<any> => {
+  const fetchWithAuth = async <T = unknown>(url: string, options: RequestInit = {}): Promise<T> => {
     try {
       // If we don't have a token, get one first
       let authToken = token;

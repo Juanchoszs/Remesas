@@ -4,6 +4,58 @@ import { obtenerTokenSiigo, SiigoAuthError } from '@/lib/siigo/auth';
 const SIIGO_BASE_URL = process.env.SIIGO_BASE_URL || 'https://api.siigo.com/v1';
 const PARTNER_ID = process.env.SIIGO_PARTNER_ID || 'RemesasYMensajes';
 
+// Definir interfaces para los tipos de datos de Siigo
+interface SiigoDocumentItem {
+  code?: string;
+  description?: string;
+  quantity?: number;
+  price?: number;
+  discount?: number;
+  taxes?: Array<{ id: number }>;
+  type?: string;
+}
+
+interface SiigoDocument {
+  id?: string;
+  document?: { id: number };
+  date?: string;
+  supplier?: {
+    identification?: string;
+    branch_office?: number;
+  };
+  cost_center?: number;
+  provider_invoice?: { prefix: string; number: string };
+  currency?: { code: string; exchange_rate: number };
+  observations?: string;
+  discount_type?: string;
+  supplier_by_item?: boolean;
+  tax_included?: boolean;
+  items?: SiigoDocumentItem[];
+  payments?: Array<{
+    id: number;
+    value: number;
+    due_date: string;
+  }>;
+}
+
+interface SiigoPurchaseDocument extends SiigoDocument {
+  items: SiigoDocumentItem[];
+  payments: Array<{
+    id: number;
+    value: number;
+    due_date: string;
+  }>;
+}
+
+// interface SiigoApiErrorDetails {
+//   status?: number;
+//   message?: string;
+//   errors?: Array<{
+//     Code?: string;
+//     Message?: string;
+//   }>;
+// }
+
 function resolveBasePath(typeParam: string | null) {
   const type = (typeParam || 'FC').toUpperCase();
   switch (type) {
@@ -33,7 +85,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
     try {
       token = await obtenerTokenSiigo();
     } catch (e) {
-      if (e instanceof SiigoAuthError && (e as any)?.details?.status === 429) {
+      if (e instanceof SiigoAuthError && (e as { details?: { status?: number } })?.details?.status === 429) {
         await sleep(1200);
         token = await obtenerTokenSiigo(true);
       } else {
@@ -87,7 +139,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
     try {
       token = await obtenerTokenSiigo();
     } catch (e) {
-      if (e instanceof SiigoAuthError && (e as any)?.details?.status === 429) {
+      if (e instanceof SiigoAuthError && (e as { details?: { status?: number } })?.details?.status === 429) {
         await sleep(1200);
         token = await obtenerTokenSiigo(true);
       } else {
@@ -100,12 +152,12 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
     const normalizedBody = (() => {
       try {
         if (basePath === 'purchases' && body && Array.isArray(body.items)) {
-          const normItems = body.items.map((it: any) => {
+          const normItems = body.items.map((it: SiigoDocumentItem) => {
             const rawType = String(it?.type || '').trim();
             const normalizedType = ['Product', 'FixedAsset', 'Account'].includes(rawType)
               ? rawType
               : (rawType === 'Service' ? 'Account' : 'Product');
-            const mapped: any = {
+            const mapped: Partial<SiigoDocumentItem> = {
               code: String(it.code || ''),
               ...(it.description ? { description: String(it.description) } : {}),
               quantity: Number(it.quantity || 0),
@@ -113,7 +165,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
             };
             mapped.type = normalizedType;
             if (it.discount !== undefined && it.discount !== null) mapped.discount = Number(it.discount);
-            if (Array.isArray(it.taxes) && it.taxes.length > 0) mapped.taxes = it.taxes.map((t: any) => ({ id: Number(t.id) }));
+            if (Array.isArray(it.taxes) && it.taxes.length > 0) mapped.taxes = it.taxes.map((t: { id: number }) => ({ id: Number(t.id) }));
             return mapped;
           });
           return { ...body, items: normItems };
@@ -123,7 +175,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
     })();
 
     // Si es compras (FC), completar el payload con campos requeridos desde el documento actual y recalcular payments
-    let requestBody: any = normalizedBody;
+    let requestBody: Partial<SiigoPurchaseDocument> = normalizedBody;
     if (basePath === 'purchases') {
       // 1) Cargar documento actual para extraer campos requeridos
       const currentUrlObj = new URL(`${SIIGO_BASE_URL}/${basePath}/${encodeURIComponent(id)}`);
@@ -154,13 +206,13 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
       }
 
       // 2) Ensamblar items (siempre enviarlos) y heredar taxes desde documento actual si no se envían
-      const incomingItems: any[] = Array.isArray(normalizedBody.items) ? normalizedBody.items : ([] as any[]);
-      const currentItems: any[] = Array.isArray(current?.items) ? current.items : [];
-      const items = incomingItems.map((it: any) => {
+      const incomingItems: SiigoDocumentItem[] = Array.isArray(normalizedBody.items) ? normalizedBody.items : [];
+      const currentItems: SiigoDocumentItem[] = Array.isArray(current?.items) ? current.items : [];
+      const items = incomingItems.map((it: SiigoDocumentItem) => {
         if (it && (!it.taxes || it.taxes.length === 0)) {
-          const match = currentItems.find((ci: any) => String(ci.code || '').trim() === String(it.code || '').trim());
+          const match = currentItems.find((ci: SiigoDocumentItem) => String(ci.code || '').trim() === String(it.code || '').trim());
           if (match && Array.isArray(match.taxes) && match.taxes.length > 0) {
-            return { ...it, taxes: match.taxes.map((t: any) => ({ id: Number(t.id) })) };
+            return { ...it, taxes: match.taxes.map((t: { id: number }) => ({ id: Number(t.id) })) };
           }
         }
         return it;
@@ -211,7 +263,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
         ? (() => {
             const identification = String(current.supplier.identification || current.supplier.identificacion || '');
             const branchOfficeNum = Number(current.supplier.branch_office);
-            const base: any = { identification };
+            const base: { identification: string; branch_office?: number } = { identification };
             // Solo incluir branch_office si es un número válido y > 0
             if (Number.isFinite(branchOfficeNum) && branchOfficeNum > 0) {
               base.branch_office = branchOfficeNum;
@@ -253,7 +305,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
       };
     }
 
-    const doFetch = async (bearer: string, payload: any): Promise<Response> => fetch(url, {
+    const doFetch = async (bearer: string, payload: Partial<SiigoPurchaseDocument>): Promise<Response> => fetch(url, {
       method: 'PUT',
       headers: {
         Authorization: `Bearer ${bearer}`,
@@ -276,7 +328,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
 
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const details = (data as any)?.errors || (data as any)?.Errors || data;
+      const details = (data as { errors?: Array<{ Code?: string; Message?: string }>; Errors?: Array<{ Code?: string; Message?: string }> })?.errors || (data as { errors?: Array<{ Code?: string; Message?: string }>; Errors?: Array<{ Code?: string; Message?: string }> })?.Errors || data;
       return NextResponse.json({ success: false, error: data?.message || 'Error al actualizar documento', details }, { status: res.status });
     }
 

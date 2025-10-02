@@ -2,6 +2,19 @@ import { NextResponse } from 'next/server';
 import { sql, deleteUploadedFile } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
 
+// Definir interfaz para el resultado de consultas DELETE
+interface DeletedFileRecord {
+  id: number;
+  file_name: string;
+  document_type: string;
+  month: number;
+  year: number;
+  user_id: number;
+  upload_date: string;
+  file_size: number;
+  mime_type: string;
+}
+
 export async function POST(request: Request) {
   // Mover la declaración de body al inicio para que esté disponible en el catch
   let body;
@@ -27,7 +40,7 @@ export async function POST(request: Request) {
     try {
       const user = await getCurrentUser();
       if (user?.id) userId = user.id;
-    } catch (e) {
+    } catch (_e) {
       console.warn('No se pudo obtener el usuario actual, usando ID 1');
     }
 
@@ -76,7 +89,7 @@ export async function POST(request: Request) {
               AND file_name = ${fileName}
               AND (user_id = ${userId} OR ${userId} = 1)
             RETURNING *
-          ` as any[];
+          ` as DeletedFileRecord[];
           
           // Si no se encontró con el ID de usuario, intentar sin esa restricción
           if (!result || result.length === 0) {
@@ -87,7 +100,7 @@ export async function POST(request: Request) {
                 AND year = ${year}
                 AND file_name = ${fileName}
               RETURNING *
-            ` as any[];
+            ` as DeletedFileRecord[];
           }
         } else {
           // Eliminar sin nombre de archivo
@@ -98,7 +111,7 @@ export async function POST(request: Request) {
               AND year = ${year}
               AND (user_id = ${userId} OR ${userId} = 1)
             RETURNING *
-          ` as any[];
+          ` as DeletedFileRecord[];
           
           // Si no se encontró con el ID de usuario, intentar sin esa restricción
           if (!result || result.length === 0) {
@@ -108,7 +121,7 @@ export async function POST(request: Request) {
                 AND month = ${month}
                 AND year = ${year}
               RETURNING *
-            ` as any[];
+            ` as DeletedFileRecord[];
           }
         }
         

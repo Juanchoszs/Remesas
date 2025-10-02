@@ -7,6 +7,55 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 
+// Definir interfaces para los tipos de datos de Siigo
+interface SiigoDocumentItem {
+  id?: string | number;
+  code?: string;
+  sku?: string;
+  product_code?: string;
+  account?: {
+    code?: string;
+  };
+  description?: string;
+  name?: string;
+  quantity?: number | string;
+  price?: number | string;
+  value?: number | string;
+  total?: number | string;
+  type?: string;
+}
+
+interface SiigoDocument {
+  id?: string;
+  date?: string;
+  issue_date?: string;
+  observations?: string;
+  provider_invoice?: unknown;
+  invoice_prefix?: string;
+  invoice_number?: string | number;
+  items?: SiigoDocumentItem[];
+}
+
+interface SiigoApiError {
+  message?: string;
+  error?: string;
+  details?: unknown;
+  Errors?: Array<{
+    Code?: string;
+    Message?: string;
+  }>;
+  errors?: Array<{
+    code?: string;
+    message?: string;
+  }>;
+}
+
+interface SiigoApiResponse {
+  success?: boolean;
+  data?: SiigoDocument;
+  error?: string;
+}
+
 export default function EditorClient({ id, type }: { id: string; type: string }) {
   const router = useRouter();
   const sp = useSearchParams();
@@ -23,11 +72,11 @@ export default function EditorClient({ id, type }: { id: string; type: string })
         setLoading(true);
         setError(null);
         const res = await fetch(`/api/siigo/documents/${encodeURIComponent(id)}?type=${effectiveType}`, { cache: 'no-store' });
-        const data = await res.json();
+        const data: SiigoApiResponse = await res.json();
         if (!res.ok || data?.success === false) {
           throw new Error(data?.error || 'No se pudo cargar la factura');
         }
-        const doc = data.data || data;
+        const doc: SiigoDocument = (data as SiigoApiResponse).data || (data as SiigoDocument);
         const editorValue: InvoiceEditorValue = {
           id,
           type: effectiveType,
@@ -35,7 +84,7 @@ export default function EditorClient({ id, type }: { id: string; type: string })
           observations: doc.observations || '',
           provider_invoice: doc.provider_invoice || { prefix: doc.invoice_prefix || '', number: String(doc.invoice_number || '') },
           items: Array.isArray(doc.items)
-            ? doc.items.map((it: any) => ({
+            ? doc.items.map((it: SiigoDocumentItem) => ({
                 id: String(it.id ?? ''),
                 code: it.code || it.sku || it.product_code || it?.account?.code || '',
                 description: it.description || it.name || '',
@@ -47,8 +96,8 @@ export default function EditorClient({ id, type }: { id: string; type: string })
             : [],
         };
         setInitial(editorValue);
-      } catch (e: any) {
-        setError(e?.message || 'Error cargando la factura');
+      } catch (e: unknown) {
+        setError((e as Error)?.message || 'Error cargando la factura');
       } finally {
         setLoading(false);
       }
@@ -60,7 +109,7 @@ export default function EditorClient({ id, type }: { id: string; type: string })
     try {
       setSaving(true);
       setError(null);
-      const update: any = {
+      const update: Partial<SiigoDocument> = {
         date: payload.date,
         observations: payload.observations,
         provider_invoice: payload.provider_invoice,
@@ -78,12 +127,12 @@ export default function EditorClient({ id, type }: { id: string; type: string })
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(update),
       });
-      const data = await res.json().catch(() => ({}));
+      const data = await res.json().catch(() => ({} as SiigoApiError));
       if (!res.ok || data?.success === false) {
         const details = (data && (data.details || data.Errors || data.errors)) || null;
         const detailsMsg = details
           ? Array.isArray(details)
-            ? details.map((d: any) => `${d.Code || d.code || ''} ${d.Message || d.message || ''}`.trim()).filter(Boolean).join(' | ')
+            ? details.map((d: { Code?: string; code?: string; Message?: string; message?: string }) => `${d.Code || d.code || ''} ${d.Message || d.message || ''}`.trim()).filter(Boolean).join(' | ')
             : JSON.stringify(details)
           : '';
         const msg = [data?.error || 'Error actualizando la factura en Siigo', detailsMsg].filter(Boolean).join(' — ');
@@ -91,10 +140,10 @@ export default function EditorClient({ id, type }: { id: string; type: string })
       }
       toast.success('Factura actualizada correctamente');
       router.push('/consultar-facturas');
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error('[EditorClient][PUT] Error:', e);
-      toast.error(e?.message || 'Error al actualizar');
-      setError(e?.message || 'Error al actualizar');
+      toast.error((e as Error)?.message || 'Error al actualizar');
+      setError((e as Error)?.message || 'Error al actualizar');
     } finally {
       setSaving(false);
     }
@@ -106,16 +155,16 @@ export default function EditorClient({ id, type }: { id: string; type: string })
       setSaving(true);
       setError(null);
       const res = await fetch(`/api/siigo/documents/${encodeURIComponent(id)}?type=${effectiveType}`, { method: 'DELETE' });
-      const data = await res.json().catch(() => ({}));
+      const data = await res.json().catch(() => ({} as SiigoApiError));
       if (!res.ok || data?.success === false) {
         throw new Error(data?.error || 'Error eliminando la factura');
       }
       toast.success('Factura eliminada');
       router.push('/consultar-facturas');
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      toast.error(e?.message || 'Error al eliminar');
-      setError(e?.message || 'Error al eliminar');
+      toast.error((e as Error)?.message || 'Error al eliminar');
+      setError((e as Error)?.message || 'Error al eliminar');
     } finally {
       setSaving(false);
     }

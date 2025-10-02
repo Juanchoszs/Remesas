@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ChartData, ChartOptions, ScriptableContext } from 'chart.js';
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ChartData, ChartOptions, ScriptableContext, TooltipItem } from 'chart.js';
 import { toast } from 'sonner';
 
 // Register ChartJS components
@@ -28,10 +28,10 @@ const Bar = dynamic<{
 });
 
 // Constantes
-const MONTHS = [
-  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
-] as const;
+// const MONTHS = [
+//   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+//   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+// ] as const;
 
 // Tipos
 export type TimeRange = 'day' | 'week' | 'month' | 'quarter' | 'year';
@@ -49,18 +49,18 @@ interface ChartColors {
   gradient: (context: ScriptableContext<'bar'>) => CanvasGradient | string;
 }
 
-interface ApiChartDataResponse {
-  success: boolean;
-  data?: {
-    labels: string[];
-    values: number[];
-    total: string;
-    count: number;
-    documentType: string;
-    timeRange: string;
-  };
-  error?: string;
-}
+// interface ApiChartDataResponse {
+//   success: boolean;
+//   data?: {
+//     labels: string[];
+//     values: number[];
+//     total: string;
+//     count: number;
+//     documentType: string;
+//     timeRange: string;
+//   };
+//   error?: string;
+// }
 
 export interface AnalyticsChartProps {
   title: string;
@@ -132,7 +132,7 @@ const CHART_COLORS: Record<DocumentType, ChartColors> = {
 export function AnalyticsChart({ 
   title, 
   documentType, 
-  timeRange = 'month', 
+  timeRange: _timeRange = 'month', 
   className = '' 
 }: AnalyticsChartProps) {
   // State for chart data and UI
@@ -312,7 +312,7 @@ export function AnalyticsChart({
                 },
                 tooltip: {
                   callbacks: {
-                    label: (context: any) => formatValue(context.parsed.y)
+                    label: (tooltipItem: { parsed: { y: number } }) => formatValue(tooltipItem.parsed.y)
                   }
                 }
               },
@@ -325,7 +325,7 @@ export function AnalyticsChart({
                 y: {
                   beginAtZero: true,
                   ticks: {
-                    callback: (value: any) => {
+                    callback: (value: number | string) => {
                       if (typeof value === 'number') {
                         return formatValue(value);
                       }

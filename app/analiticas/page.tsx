@@ -17,6 +17,63 @@ const months = [
   'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'
 ];
 
+// Definir interfaz para los datos del gráfico
+interface ChartDataset {
+  label: string;
+  data: unknown[];
+}
+
+// Definir interfaces para la configuración del gráfico
+interface ChartContext {
+  dataset: { label?: string };
+  parsed: { y: number | null };
+}
+
+interface ChartTooltipCallbacks {
+  label: (context: ChartContext) => string;
+}
+
+interface ChartTickCallback {
+  (value: unknown): string;
+}
+
+interface ChartOptions {
+  responsive: boolean;
+  maintainAspectRatio: boolean;
+  plugins: {
+    legend: {
+      position: 'top';
+      labels: {
+        boxWidth: number;
+        padding: number;
+      };
+    };
+    title: {
+      display: boolean;
+      text: string;
+      font: {
+        size: number;
+      };
+    };
+    tooltip: {
+      callbacks: ChartTooltipCallbacks;
+    };
+  };
+  scales: {
+    y: {
+      beginAtZero: boolean;
+      ticks: {
+        callback: ChartTickCallback;
+      };
+    };
+    x: {
+      grid: {
+        display: boolean;
+      };
+    };
+  };
+}
+
 type UploadedFilesState = Record<DocumentType | 'unknown', number>;
 
 // Función para formatear números en formato de moneda colombiana
@@ -70,10 +127,10 @@ export default function AnalyticsPage() {
         } as Record<DocumentType, ProcessedData>;
 
         // Procesar los datasets del backend
-        data.datasets.forEach((dataset: any) => {
+        data.datasets.forEach((dataset: ChartDataset) => {
           const docType = dataset.label as DocumentType;
           if (updatedChartData[docType] !== undefined) {
-            const values = dataset.data.map((val: any) => Number(val) || 0);
+            const values = dataset.data.map((val: unknown) => Number(val) || 0);
             updatedChartData[docType] = {
               months: [...data.labels],
               values: values,
@@ -169,7 +226,7 @@ export default function AnalyticsPage() {
           }
           
           // Configuración del gráfico
-          const chartOptions = {
+          const _chartOptions: ChartOptions = {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
@@ -189,7 +246,7 @@ export default function AnalyticsPage() {
               },
               tooltip: {
                 callbacks: {
-                  label: function(context: any) {
+                  label: function(context: ChartContext) {
                     let label = context.dataset.label || '';
                     if (label) {
                       label += ': ';
@@ -206,7 +263,7 @@ export default function AnalyticsPage() {
               y: {
                 beginAtZero: true,
                 ticks: {
-                  callback: (value: any) => formatCurrency(Number(value))
+                  callback: (value: unknown) => formatCurrency(Number(value))
                 }
               },
               x: {
@@ -268,7 +325,7 @@ export default function AnalyticsPage() {
   }) => {
     if (result.success) {
       // Actualizar el contador de archivos subidos
-      setUploadedFiles(prev => ({
+      setUploadedFiles((prev: UploadedFilesState) => ({
         ...prev,
         [result.documentType]: (prev[result.documentType] || 0) + 1
       }));
@@ -289,7 +346,7 @@ export default function AnalyticsPage() {
     // toast.success('Carga de archivos completada');
   };
 
-  const handleFilesUploaded = useCallback(async (files: Array<{ type: DocumentType; file: File }>) => {
+  const _handleFilesUploaded = useCallback(async (files: Array<{ type: DocumentType; file: File }>) => {
     try {
       // Actualizar el contador de archivos subidos
       const newCounts = { ...uploadedFiles };

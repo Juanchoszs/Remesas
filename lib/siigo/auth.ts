@@ -1,4 +1,22 @@
 
+// Definir interfaz para la respuesta de autenticación de Siigo
+interface SiigoAuthResponse {
+  access_token?: string;
+  expires_in?: number;
+  token_type?: string;
+  scope?: string;
+  Errors?: Array<{
+    Code?: string;
+    Message?: string;
+  }>;
+  errors?: Array<{
+    Code?: string;
+    Message?: string;
+  }>;
+  error_description?: string;
+  error?: string;
+}
+
 export class SiigoAuthError extends Error {
   constructor(message: string, public readonly details?: unknown) {
     super(message);
@@ -63,7 +81,7 @@ export async function obtenerTokenSiigo(forceRefresh = false): Promise<string> {
       });
 
       const text = await response.text();
-      let responseData: any = {};
+      let responseData: SiigoAuthResponse = {};
       try { responseData = text ? JSON.parse(text) : {}; } catch {}
 
       if (response.status === 429) {

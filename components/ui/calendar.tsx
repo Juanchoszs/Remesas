@@ -17,6 +17,9 @@ import {
 import { cn } from "@/lib/utils"
 import { buttonVariants } from "@/components/ui/button"
 
+// Create a type that allows any valid DayPicker props
+// type DayPickerCompatibleProps = DayPickerSingleProps | DayPickerMultipleProps | DayPickerRangeProps
+
 type CalendarBaseProps = {
   className?: string
   classNames?: Record<string, string>
@@ -89,8 +92,8 @@ function Calendar({
   return (
     <div className={cn("p-3", className)}>
       {(() => {
-        // Type assertion to handle the mode prop
-        const DayPickerComponent = DayPickerPrimitive as any;
+        // Use a more specific type assertion that maintains functionality while avoiding 'any'
+        const DayPickerComponent = DayPickerPrimitive as React.ComponentType<Omit<CalendarProps, keyof CalendarBaseProps>>;
         return (
           <DayPickerComponent
             {...commonProps}

@@ -3,8 +3,8 @@
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+// import { Progress } from '@/components/ui/progress';
+// import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { 
   AlertCircle, 
   FileText, 
@@ -12,8 +12,8 @@ import {
   X, 
   CheckCircle2, 
   Loader2,
-  FileSpreadsheet,
-  RefreshCw
+  // FileSpreadsheet,
+  // RefreshCw
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -73,10 +73,10 @@ export function CargarArchivo({
   alProcesarArchivo, 
   alCompletarCarga, 
   tipoDocumento, 
-  rangoTiempo 
+  rangoTiempo: _rangoTiempo 
 }: PropsCargarArchivo) {
   const [cargando, setCargando] = useState(false);
-  const [progreso, setProgreso] = useState(0);
+  // const [progreso, setProgreso] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [archivos, setArchivos] = useState<ArchivoCargado[]>([]);
 
@@ -235,11 +235,20 @@ export function CargarArchivo({
       </div>
 
       {error && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Error</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
+        // <Alert variant="destructive">
+        //   <AlertCircle className="h-4 w-4" />
+        //   <AlertTitle>Error</AlertTitle>
+        //   <AlertDescription>{error}</AlertDescription>
+        // </Alert>
+        <div className="p-4 bg-red-50 border border-red-200 rounded-md">
+          <div className="flex items-center">
+            <AlertCircle className="h-4 w-4 text-red-500 mr-2" />
+            <div>
+              <p className="text-sm font-medium text-red-800">Error</p>
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+          </div>
+        </div>
       )}
 
       {archivos.length > 0 && (
