@@ -161,6 +161,103 @@ const getStatusInfo = (status: string) => {
   }
 };
 
+// Componente para mostrar una fila de factura de compra (FC)
+const FCRow = ({ invoice, onView }: { invoice: Invoice, onView: () => void }) => {
+  const statusInfo = getStatusInfo(invoice.status);
+  
+  return (
+    <TableRow key={invoice.id}>
+      <TableCell className="font-medium">
+        <div className="flex flex-col">
+          <span>{invoice.number || 'N/A'}</span>
+          {invoice.provider_invoice && (
+            <span className="text-xs text-muted-foreground">
+              Factura Proveedor: {invoice.provider_invoice.prefix}-{invoice.provider_invoice.number}
+            </span>
+          )}
+          <span className="text-xs text-muted-foreground">
+            {invoice.document_type?.name || 'Factura de Compra'}
+          </span>
+        </div>
+      </TableCell>
+      <TableCell>
+        <div className="flex flex-col">
+          <span>
+            {invoice.date 
+              ? format(new Date(invoice.date), 'dd/MM/yyyy', { locale: es })
+              : 'N/A'}
+          </span>
+          {invoice.due_date && (
+            <span className="text-xs text-muted-foreground">
+              Vence: {format(new Date(invoice.due_date), 'dd/MM/yyyy', { locale: es })}
+            </span>
+          )}
+        </div>
+      </TableCell>
+      <TableCell>
+        <div className="flex flex-col">
+          <span className="font-medium">
+            {invoice.supplier?.name || 'Sin proveedor'}
+          </span>
+          <div className="text-xs text-muted-foreground">
+            {invoice.supplier?.identification || 'N/A'}
+            {invoice.supplier?.branch_office && invoice.supplier.branch_office !== '0' && (
+              <> - Sucursal: {invoice.supplier.branch_office}</>
+            )}
+          </div>
+        </div>
+      </TableCell>
+      <TableCell className="text-right">
+        <div className="flex flex-col items-end">
+          <span className="font-semibold">
+            {`$${Math.round(Number(invoice.total)).toLocaleString('es-CO')}`}
+          </span>
+          {invoice.balance !== undefined && invoice.balance > 0 && (
+            <span className="text-xs text-muted-foreground">
+              Saldo: {`$${Math.round(Number(invoice.balance)).toLocaleString('es-CO')}`}
+            </span>
+          )}
+        </div>
+      </TableCell>
+      <TableCell className="text-center">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge variant={statusInfo.variant} className="whitespace-nowrap cursor-help">
+              {statusInfo.text}
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-[300px]">
+            <p className="text-sm">
+              {invoice.status === 'paid' && 'Factura pagada completamente'}
+              {invoice.status === 'partially_paid' && 'Factura con pago parcial'}
+              {invoice.status === 'draft' && 'Documento en borrador'}
+              {invoice.status === 'cancelled' && 'Documento anulado'}
+              {!['paid', 'partially_paid', 'draft', 'cancelled'].includes(invoice.status) && `Estado: ${invoice.status}`}
+            </p>
+            {invoice.metadata?.created && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Última actualización: {new Date(invoice.metadata.created).toLocaleString('es-CO')}
+              </p>
+            )}
+          </TooltipContent>
+        </Tooltip>
+      </TableCell>
+      <TableCell className="text-right">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-9 w-9 rounded-full hover:bg-primary/10 hover:text-primary transition-colors group relative"
+          onClick={onView}
+          title="Ver detalles de la factura"
+        >
+          <Eye className="h-4 w-4 group-hover:scale-110 transition-transform" />
+          <span className="sr-only">Ver detalles de la factura</span>
+        </Button>
+      </TableCell>
+    </TableRow>
+  );
+};
+
 // Server component wrapper
 export default function ConsultarFacturas() {
   const [isClient, setIsClient] = useState(false);
@@ -238,6 +335,54 @@ function ClientSideConsultarFacturas() {
     setError(null);
   };
 
+  // Función para formatear facturas de compra (FC)
+  const formatFCInvoice = (invoice: any) => {
+    return {
+      id: invoice.id || `inv-${Math.random().toString(36).substr(2, 9)}`,
+      number: invoice.number || 'N/A',
+      name: invoice.name || '',
+      date: invoice.date || new Date().toISOString(),
+      due_date: invoice.payments && invoice.payments.length > 0 ? invoice.payments[0].due_date : '',
+      supplier: {
+        id: invoice.supplier?.id || '',
+        name: invoice.supplier?.name || 'Proveedor no especificado',
+        identification: invoice.supplier?.identification || '',
+        branch_office: invoice.supplier?.branch_office != null ? String(invoice.supplier.branch_office) : '0'
+      },
+      total: parseFloat(invoice.total) || 0,
+      balance: parseFloat(invoice.balance) || 0,
+      status: invoice.balance > 0 ? 'partially_paid' : 'paid',
+      created_at: invoice.metadata?.created || new Date().toISOString(),
+      items: invoice.items?.map((item: any) => ({
+        id: item.id || `item-${Math.random().toString(36).substr(2, 9)}`,
+        code: item.code || '',
+        description: item.description || 'Producto sin descripción',
+        quantity: parseFloat(item.quantity) || 0,
+        price: parseFloat(item.price) || 0,
+        total: parseFloat(item.total) || 0,
+        type: item.type || '',
+        discount: parseFloat(item.discount) || 0
+      })) || [],
+      payments: invoice.payments?.map((payment: any) => ({
+        id: payment.id || `pay-${Math.random().toString(36).substr(2, 9)}`,
+        method: payment.name || 'No especificado',
+        value: parseFloat(payment.value) || 0,
+        due_date: payment.due_date || '',
+        status: 'pending'
+      })) || [],
+      document_type: {
+        id: 'FC',
+        name: 'Factura de Compra',
+        code: 'FC'
+      },
+      currency: { code: 'COP', symbol: '$' },
+      provider_invoice: invoice.provider_invoice || null,
+      observations: invoice.observations || '',
+      discount_type: invoice.discount_type || 'Value',
+      metadata: invoice.metadata || {}
+    };
+  };
+
   // Function to fetch documents from Siigo API based on selected type
   const fetchPurchaseInvoices = useCallback(async () => {
     if (!selectedType) return;
@@ -257,7 +402,18 @@ function ClientSideConsultarFacturas() {
       let endpoint = '';
       let response;
       
-      if (selectedDocType.type === 'sale') {
+      if (selectedType === 'FC') {
+        // Endpoint específico para facturas de compra (FC)
+        const params = new URLSearchParams({
+          type: 'FC',
+          page: '1',
+          pageSize: '100',
+          includeDependencies: 'true'
+        });
+        endpoint = `/api/siigo/documents?${params.toString()}`;
+        console.log('API Endpoint (FC purchase):', endpoint);
+        response = await fetch(endpoint);
+      } else if (selectedDocType.type === 'sale') {
         // Usar el endpoint específico para facturas de venta
         if (selectedDocType.id === 'RC') {
           // Para recibos de caja, usar la ruta específica de vouchers
@@ -270,7 +426,7 @@ function ClientSideConsultarFacturas() {
         }
         response = await fetch(endpoint);
       } else {
-        // Para facturas de compra y otros documentos
+        // Para otros documentos de compra
         const params = new URLSearchParams({
           type: selectedType,
           page: '1',
@@ -336,7 +492,14 @@ function ClientSideConsultarFacturas() {
       }
 
       // Map and transform the data to match our Invoice interface
-      const formattedInvoices = invoicesData.map((invoice: any) => ({
+      const formattedInvoices = invoicesData.map((invoice: any) => {
+        // Si es una factura de compra (FC), usar el formateador específico
+        if (selectedType === 'FC' || invoice.type === 'FC' || invoice.document_type?.code === 'FC') {
+          return formatFCInvoice(invoice);
+        }
+        
+        // Para otros tipos de documentos, usar el formato estándar
+        return {
         id: invoice.id || `inv-${Math.random().toString(36).substr(2, 9)}`,
         number: invoice.number || 'N/A',
         date: invoice.date || invoice.created_at || new Date().toISOString(),
@@ -400,7 +563,8 @@ function ClientSideConsultarFacturas() {
           symbol: invoice.currency.symbol || '$'
         } : { code: 'COP', symbol: '$' },
         metadata: invoice.metadata || {}
-      }));
+      };
+      });
 
       console.log('Formatted invoices:', formattedInvoices);
       setInvoices(formattedInvoices);
@@ -420,6 +584,11 @@ function ClientSideConsultarFacturas() {
     // Fetch purchase invoices from Siigo API
     fetchPurchaseInvoices();
   }, []);
+  
+  // Función para actualizar la búsqueda de facturas
+  const handleRefresh = () => {
+    fetchPurchaseInvoices();
+  };
 
   // Helper function to get status text and variant
   const getStatusInfo = (status: string) => {
@@ -460,7 +629,7 @@ function ClientSideConsultarFacturas() {
             <Button 
               variant="outline" 
               size="sm" 
-              onClick={handleSearch}
+              onClick={handleRefresh}
               disabled={searching}
             >
               {searching ? (
@@ -493,73 +662,90 @@ function ClientSideConsultarFacturas() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {invoices.map((invoice) => (
-                  <TableRow key={invoice.id}>
-                    <TableCell className="font-medium">
-                      <div className="flex flex-col">
-                        <span>{invoice.number || 'N/A'}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {invoice.document_type?.name || 'Factura'}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {invoice.date 
-                        ? format(new Date(invoice.date), 'dd/MM/yyyy', { locale: es })
-                        : 'N/A'}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-col">
-                        <span className="font-medium">
-                          {invoice.supplier?.name || invoice.customer?.name || 'Sin proveedor'}
-                        </span>
-                        <div className="text-xs text-muted-foreground">
-                          {invoice.supplier?.identification || invoice.customer?.identification || 'N/A'}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right font-semibold">
-                      {`$${Math.round(Number(invoice.total)).toLocaleString('es-CO')}`}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Badge variant={getStatusInfo(invoice.status).variant} className="whitespace-nowrap cursor-help">
-                            {getStatusInfo(invoice.status).text}
-                          </Badge>
-                        </TooltipTrigger>
-                        <TooltipContent className="max-w-[300px]">
-                          <p className="text-sm">
-                            {invoice.status === 'draft' && 'Documento en borrador'}
-                            {invoice.status === 'posted' && 'Documento registrado'}
-                            {invoice.status === 'cancelled' && 'Documento anulado'}
-                            {!['draft', 'posted', 'cancelled'].includes(invoice.status) && `Estado: ${invoice.status}`}
-                          </p>
-                          {invoice.updated_at && (
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Última actualización: {new Date(invoice.updated_at).toLocaleString()}
-                            </p>
-                          )}
-                        </TooltipContent>
-                      </Tooltip>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9 rounded-full hover:bg-primary/10 hover:text-primary transition-colors group relative"
-                        onClick={() => {
+                {invoices.map((invoice) => {
+                  // Componente específico para facturas de compra (FC)
+                  if (invoice.document_type?.code === 'FC' || invoice.type === 'FC') {
+                    return (
+                      <FCRow 
+                        key={invoice.id} 
+                        invoice={invoice} 
+                        onView={() => {
                           setSelectedInvoice(invoice);
                           setIsViewerOpen(true);
-                        }}
-                        title="Ver detalles de la factura"
-                      >
-                        <Eye className="h-4 w-4 group-hover:scale-110 transition-transform" />
-                        <span className="sr-only">Ver detalles de la factura</span>
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                        }} 
+                      />
+                    );
+                  }
+                  
+                  // Componente estándar para otros tipos de facturas
+                  return (
+                    <TableRow key={invoice.id}>
+                      <TableCell className="font-medium">
+                        <div className="flex flex-col">
+                          <span>{invoice.number || 'N/A'}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {invoice.document_type?.name || 'Factura'}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {invoice.date 
+                          ? format(new Date(invoice.date), 'dd/MM/yyyy', { locale: es })
+                          : 'N/A'}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-col">
+                          <span className="font-medium">
+                            {invoice.supplier?.name || invoice.customer?.name || 'Sin proveedor'}
+                          </span>
+                          <div className="text-xs text-muted-foreground">
+                            {invoice.supplier?.identification || invoice.customer?.identification || 'N/A'}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right font-semibold">
+                        {`$${Math.round(Number(invoice.total)).toLocaleString('es-CO')}`}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Badge variant={getStatusInfo(invoice.status).variant} className="whitespace-nowrap cursor-help">
+                              {getStatusInfo(invoice.status).text}
+                            </Badge>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-[300px]">
+                            <p className="text-sm">
+                              {invoice.status === 'draft' && 'Documento en borrador'}
+                              {invoice.status === 'posted' && 'Documento registrado'}
+                              {invoice.status === 'cancelled' && 'Documento anulado'}
+                              {!['draft', 'posted', 'cancelled'].includes(invoice.status) && `Estado: ${invoice.status}`}
+                            </p>
+                            {invoice.updated_at && (
+                              <p className="text-xs text-muted-foreground mt-1">
+                                Última actualización: {new Date(invoice.updated_at).toLocaleString()}
+                              </p>
+                            )}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-9 w-9 rounded-full hover:bg-primary/10 hover:text-primary transition-colors group relative"
+                          onClick={() => {
+                            setSelectedInvoice(invoice);
+                            setIsViewerOpen(true);
+                          }}
+                          title="Ver detalles de la factura"
+                        >
+                          <Eye className="h-4 w-4 group-hover:scale-110 transition-transform" />
+                          <span className="sr-only">Ver detalles de la factura</span>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
@@ -1045,30 +1231,43 @@ function ClientSideConsultarFacturas() {
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="type">Tipo de Factura</Label>
+                
+                {/* Componente tipo switch para seleccionar entre categorías */}
+                <div className="flex space-x-2 mb-4">
+                  {documentCategories.map((category) => (
+                    <Button 
+                      key={category.id}
+                      variant={documentCategories.find(c => c.types.some(t => t.id === selectedType))?.id === category.id ? "default" : "outline"}
+                      className="flex-1"
+                      onClick={() => {
+                        // Seleccionar el primer tipo de documento de esta categoría
+                        if (category.types.length > 0) {
+                          setSelectedType(category.types[0].id);
+                        }
+                      }}
+                    >
+                      {category.name}
+                    </Button>
+                  ))}
+                </div>
+                
+                {/* Select para tipos específicos dentro de la categoría seleccionada */}
                 <Select 
                   value={selectedType} 
                   onValueChange={setSelectedType}
                   disabled={loading}
                 >
-                  <SelectTrigger className="w-[300px]">
+                  <SelectTrigger className="w-full">
                     <SelectValue placeholder="Seleccione un tipo de documento" />
                   </SelectTrigger>
                   <SelectContent>
-                    {documentCategories.map((category) => (
-                      <div key={category.id}>
-                        <div className="px-2 py-1.5 text-sm font-medium text-muted-foreground">
-                          {category.name}
-                        </div>
-                        {category.types.map((type) => (
-                          <SelectItem key={type.id} value={type.id} className="pl-6">
-                            {type.name}
-                          </SelectItem>
-                        ))}
-                        {category.id !== documentCategories[documentCategories.length - 1].id && (
-                          <div className="h-px bg-border my-1" />
-                        )}
-                      </div>
-                    ))}
+                    {documentCategories
+                      .find(category => category.types.some(type => type.id === selectedType))?.types
+                      .map((type) => (
+                        <SelectItem key={type.id} value={type.id}>
+                          {type.name}
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -1216,105 +1415,329 @@ function ClientSideConsultarFacturas() {
 
                 {/* Detalles de la Factura */}
                 <div className="space-y-4">
-                  <h3 className="text-lg font-semibold">Detalles de la Factura</h3>
+                  <h3 className="text-lg font-semibold">
+                    {selectedInvoice.type === 'DebtPayment' ? 'Detalles del Pago de Deuda' : 'Detalles de la Factura'}
+                  </h3>
                   <div className="border rounded-lg overflow-hidden">
-                    <div className="bg-gray-50 px-4 py-3 border-b">
-                      <div className="grid grid-cols-12 gap-4">
-                        <div className="col-span-4 font-medium text-sm">Descripción</div>
-                        <div className="col-span-2 font-medium text-sm">Cuenta</div>
-                        <div className="col-span-2 font-medium text-sm">Movimiento</div>
-                        <div className="col-span-2 text-right font-medium text-sm">Valor</div>
-                        <div className="col-span-2 text-right font-medium text-sm">Total</div>
-                      </div>
-                    </div>
-                    
-                    <div className="divide-y">
-                      {selectedInvoice.items?.length ? (
-                        selectedInvoice.items.map((item: any, idx: number) => {
-                          const isDebit = item.account?.movement === 'Debit';
-                          const isCredit = item.account?.movement === 'Credit';
-                          const movementColor = isDebit ? 'text-red-600' : isCredit ? 'text-green-600' : 'text-gray-600';
-                          const movementText = isDebit ? 'Débito' : isCredit ? 'Crédito' : 'N/A';
-                          
-                          return (
-                            <div key={`${item.id ?? 'item'}-${idx}`} className="px-4 py-3 hover:bg-gray-50">
-                              <div className="grid grid-cols-12 gap-4 items-center">
-                                <div className="col-span-4">
-                                  <div className="font-medium">{item.description || 'Sin descripción'}</div>
-                                  <div className="flex flex-wrap gap-2 mt-1">
-                                    {item.code && (
-                                      <span className="text-xs bg-gray-100 rounded px-2 py-0.5">
-                                        Código: {item.code}
+                    {selectedInvoice.type === 'DebtPayment' ? (
+                      // Para pagos de deuda (RP), mostrar información específica
+                      <>
+                        <div className="bg-gray-50 px-4 py-3 border-b">
+                          <div className="grid grid-cols-12 gap-4">
+                            <div className="col-span-3 font-medium text-sm">Factura</div>
+                            <div className="col-span-3 font-medium text-sm">Cuota</div>
+                            <div className="col-span-3 font-medium text-sm">Fecha</div>
+                            <div className="col-span-3 text-right font-medium text-sm">Valor</div>
+                          </div>
+                        </div>
+                        
+                        <div className="divide-y">
+                          {selectedInvoice.items?.length ? (
+                            selectedInvoice.items.map((item: any, idx: number) => {
+                              return (
+                                <div key={`due-${idx}`} className="px-4 py-3 hover:bg-gray-50">
+                                  <div className="grid grid-cols-12 gap-4 items-center">
+                                    <div className="col-span-3">
+                                      <div className="font-medium">{item.due?.prefix || ''} {item.due?.consecutive || 'N/A'}</div>
+                                    </div>
+                                    <div className="col-span-3">
+                                      <span className="text-sm font-medium">{item.due?.quote || 1}</span>
+                                    </div>
+                                    <div className="col-span-3">
+                                      <span className="text-sm">
+                                        {item.due?.date ? new Date(item.due.date).toLocaleDateString('es-CO') : 'N/A'}
                                       </span>
-                                    )}
-                                    {item.due && (
-                                      <span className="text-xs bg-blue-100 rounded px-2 py-0.5">
-                                        {item.due.prefix}-{item.due.consecutive} (Cuota {item.due.quote})
-                                      </span>
-                                    )}
+                                    </div>
+                                    <div className="col-span-3 text-right">
+                                      <div className="font-medium">
+                                        ${Number(item.value || 0).toLocaleString('es-CO', {maximumFractionDigits: 2})}
+                                      </div>
+                                    </div>
                                   </div>
                                 </div>
-                                <div className="col-span-2">
-                                  <span className="text-sm font-mono">{item.account?.code || 'N/A'}</span>
+                              );
+                            })
+                          ) : (
+                            <div className="px-4 py-8 text-center text-muted-foreground">
+                              No hay detalles de pago disponibles
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      // Para otros tipos de documentos, mostrar la tabla estándar
+                      <>
+                        <div className="bg-gray-50 px-4 py-3 border-b">
+                          <div className="grid grid-cols-12 gap-4">
+                            <div className="col-span-5 font-medium text-sm">Descripción</div>
+                            <div className="col-span-2 font-medium text-sm">Código</div>
+                            <div className="col-span-2 font-medium text-sm">Cantidad</div>
+                            <div className="col-span-3 text-right font-medium text-sm">Valor</div>
+                          </div>
+                        </div>
+                        
+                        <div className="divide-y">
+                          {selectedInvoice.items?.length ? (
+                            selectedInvoice.items.map((item: any, idx: number) => {
+                              return (
+                                <div key={`${item.id ?? 'item'}-${idx}`} className="px-4 py-3 hover:bg-gray-50">
+                                  <div className="grid grid-cols-12 gap-4 items-center">
+                                    <div className="col-span-5">
+                                      <div className="font-medium">{item.description || 'Sin descripción'}</div>
+                                      {item.type && (
+                                        <div className="text-xs text-muted-foreground mt-1">
+                                          Tipo: {item.type}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="col-span-2">
+                                      <span className="text-sm font-mono">{item.code || 'N/A'}</span>
+                                    </div>
+                                    <div className="col-span-2 text-center">
+                                      <span className="text-sm font-medium">
+                                        {item.quantity || 1}
+                                      </span>
+                                    </div>
+                                    <div className="col-span-3 text-right">
+                                      <div className="font-medium">
+                                        ${Math.abs(Number(item.total)).toLocaleString('es-CO', {maximumFractionDigits: 2})}
+                                      </div>
+                                      {item.price && item.price !== item.total && (
+                                        <div className="text-xs text-muted-foreground">
+                                          Precio unitario: ${Number(item.price).toLocaleString('es-CO', {maximumFractionDigits: 2})}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
                                 </div>
-                                <div className="col-span-2">
-                                  <span className={`text-sm font-medium ${movementColor}`}>
-                                    {movementText}
-                                  </span>
-                                </div>
-                                <div className="col-span-2 text-right">
-                                  {`$${Number(item.price).toLocaleString('es-CO', {maximumFractionDigits: 2})}`}
-                                </div>
-                                <div className="col-span-2 text-right font-medium">
-                                  <span className={isDebit ? 'text-red-600' : isCredit ? 'text-green-600' : ''}>
-                                    {isDebit ? '-' : isCredit ? '+' : ''}${Math.abs(Number(item.total)).toLocaleString('es-CO', {maximumFractionDigits: 2})}
-                                  </span>
-                                </div>
+                              );
+                            })
+                          ) : (
+                            <div className="px-4 py-8 text-center text-muted-foreground">
+                              No hay artículos en esta factura
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Pagos */}
+                {selectedInvoice.type !== 'DebtPayment' ? (
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold">Pagos</h3>
+                    <div className="border rounded-lg overflow-hidden">
+                      <div className="bg-gray-50 px-4 py-3 border-b">
+                        <div className="grid grid-cols-12 gap-4">
+                          <div className="col-span-1 font-medium text-sm">ID</div>
+                          <div className="col-span-5 font-medium text-sm">Nombre</div>
+                          <div className="col-span-3 font-medium text-sm">Fecha de Vencimiento</div>
+                          <div className="col-span-3 text-right font-medium text-sm">Valor</div>
+                        </div>
+                      </div>
+                      
+                      <div className="divide-y">
+                      {selectedInvoice.payments?.length ? (
+                        selectedInvoice.payments.map((payment: any, idx: number) => (
+                          <div key={`payment-${payment.id ?? idx}`} className="px-4 py-3 hover:bg-gray-50">
+                            <div className="grid grid-cols-12 gap-4 items-center">
+                              <div className="col-span-1">
+                                <span className="text-sm font-mono">{payment.id}</span>
+                              </div>
+                              <div className="col-span-5">
+                                <div className="font-medium">{payment.name || 'Sin nombre'}</div>
+                              </div>
+                              <div className="col-span-3">
+                                <span className="text-sm">
+                                  {payment.due_date ? new Date(payment.due_date).toLocaleDateString('es-CO') : 'N/A'}
+                                </span>
+                              </div>
+                              <div className="col-span-3 text-right font-medium">
+                                ${Number(payment.value).toLocaleString('es-CO', {maximumFractionDigits: 2})}
                               </div>
                             </div>
-                          );
-                        })
+                          </div>
+                        ))
                       ) : (
                         <div className="px-4 py-8 text-center text-muted-foreground">
-                          No hay artículos en esta factura
+                          No hay pagos registrados para esta factura
                         </div>
                       )}
                     </div>
                   </div>
                 </div>
-
+                ) : selectedInvoice.payment && (
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold">Información de Pago</h3>
+                    <div className="border rounded-lg overflow-hidden">
+                      <div className="bg-gray-50 px-4 py-3 border-b">
+                        <div className="grid grid-cols-12 gap-4">
+                          <div className="col-span-2 font-medium text-sm">ID</div>
+                          <div className="col-span-7 font-medium text-sm">Método de Pago</div>
+                          <div className="col-span-3 text-right font-medium text-sm">Valor</div>
+                        </div>
+                      </div>
+                      
+                      <div className="divide-y">
+                        <div className="px-4 py-3 hover:bg-gray-50">
+                          <div className="grid grid-cols-12 gap-4 items-center">
+                            <div className="col-span-2">
+                              <span className="text-sm font-mono">{selectedInvoice.payment.id}</span>
+                            </div>
+                            <div className="col-span-7">
+                              <div className="font-medium">{selectedInvoice.payment.name || 'Sin nombre'}</div>
+                            </div>
+                            <div className="col-span-3 text-right">
+                              <div className="font-medium">
+                                ${Number(selectedInvoice.payment.value || 0).toLocaleString('es-CO', {maximumFractionDigits: 2})}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Retenciones */}
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold">Retenciones</h3>
+                  <div className="border rounded-lg overflow-hidden">
+                    <div className="bg-gray-50 px-4 py-3 border-b">
+                      <div className="grid grid-cols-12 gap-4">
+                        <div className="col-span-2 font-medium text-sm">ID</div>
+                        <div className="col-span-6 font-medium text-sm">Descripción</div>
+                        <div className="col-span-4 text-right font-medium text-sm">Valor</div>
+                      </div>
+                    </div>
+                    
+                    <div className="divide-y">
+                      {selectedInvoice.retentions?.length ? (
+                        selectedInvoice.retentions.map((retention: any, idx: number) => (
+                          <div key={`retention-${retention.id ?? idx}`} className="px-4 py-3 hover:bg-gray-50">
+                            <div className="grid grid-cols-12 gap-4 items-center">
+                              <div className="col-span-2">
+                                <span className="text-sm font-mono">{retention.id || idx + 1}</span>
+                              </div>
+                              <div className="col-span-6">
+                                <div className="font-medium">{retention.description || retention.name || 'Sin descripción'}</div>
+                                {retention.type && (
+                                  <div className="text-xs text-muted-foreground mt-1">
+                                    Tipo: {retention.type}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="col-span-4 text-right font-medium">
+                                ${Number(retention.value || retention.amount || 0).toLocaleString('es-CO', {maximumFractionDigits: 2})}
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="px-4 py-8 text-center text-muted-foreground">
+                          No hay retenciones registradas para esta factura
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                
                 {/* Resumen y Totales */}
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Información Adicional */}
                     <div className="space-y-2">
                       <h3 className="text-lg font-semibold">Información Adicional</h3>
-                      <div className="space-y-2 text-sm">
+                      <div className="space-y-3 text-sm">
+                        {selectedInvoice.date && (
+                          <div className="border rounded-lg p-3">
+                            <p className="font-medium">Fecha de Factura:</p>
+                            <p className="text-muted-foreground">{new Date(selectedInvoice.date).toLocaleDateString('es-CO')}</p>
+                          </div>
+                        )}
+                        
+                        {selectedInvoice.provider_invoice && (
+                          <div className="border rounded-lg p-3">
+                            <p className="font-medium">Factura del Proveedor:</p>
+                            <p className="text-muted-foreground">
+                              {selectedInvoice.provider_invoice.prefix}-{selectedInvoice.provider_invoice.number}
+                            </p>
+                          </div>
+                        )}
+                        
                         {selectedInvoice.observations && (
-                          <div>
+                          <div className="border rounded-lg p-3">
                             <p className="font-medium">Observaciones:</p>
                             <p className="text-muted-foreground">{selectedInvoice.observations}</p>
                           </div>
                         )}
+                        
                         {selectedInvoice.discount_type && (
-                          <p><span className="font-medium">Tipo de descuento:</span> {selectedInvoice.discount_type}</p>
+                          <div className="border rounded-lg p-3">
+                            <p className="font-medium">Tipo de descuento:</p>
+                            <p className="text-muted-foreground">{selectedInvoice.discount_type}</p>
+                          </div>
                         )}
+                        
                         {selectedInvoice.balance !== undefined && (
-                          <p>
-                            <span className="font-medium">Saldo pendiente:</span>{' '}
-                            <span className={Number(selectedInvoice.balance) > 0 ? 'text-amber-600' : 'text-green-600'}>
+                          <div className="border rounded-lg p-3">
+                            <p className="font-medium">Saldo pendiente:</p>
+                            <p className={Number(selectedInvoice.balance) > 0 ? 'text-amber-600' : 'text-green-600'}>
                               ${Number(selectedInvoice.balance).toLocaleString('es-CO', {maximumFractionDigits: 2})}
-                            </span>
-                          </p>
+                            </p>
+                          </div>
+                        )}
+                        
+                        {selectedInvoice.metadata?.created && (
+                          <div className="border rounded-lg p-3">
+                            <p className="font-medium">Fecha de Creación:</p>
+                            <p className="text-muted-foreground">{new Date(selectedInvoice.metadata.created).toLocaleString('es-CO', {dateStyle: 'medium', timeStyle: 'short'})}</p>
+                          </div>
                         )}
                       </div>
                     </div>
 
                     {/* Totales */}
                     <div className="space-y-2">
-                      <h3 className="text-lg font-semibold">Resumen Contable</h3>
+                      <h3 className="text-lg font-semibold">{selectedInvoice.type === 'FC' ? 'Resumen de Factura' : selectedInvoice.type === 'DebtPayment' ? 'Resumen de Pago' : 'Resumen Contable'}</h3>
                       <div className="space-y-2 text-sm">
-                        {selectedInvoice.type === 'RC' ? (
+                        {selectedInvoice.type === 'DebtPayment' ? (
+                          // Para pagos de deuda (RP), mostrar información específica
+                          <>
+                            {selectedInvoice.payment && (
+                              <div className="flex justify-between border-b pb-2">
+                                <span className="font-medium">Método de pago:</span>
+                                <span className="whitespace-nowrap font-medium">
+                                  {selectedInvoice.payment.name || 'No especificado'}
+                                </span>
+                              </div>
+                            )}
+                            
+                            {selectedInvoice.items?.length > 0 && selectedInvoice.items.map((item: any, idx: number) => (
+
+                              <div key={`due-${idx}`} className="flex justify-between py-1">
+                                <span>
+                                  Factura: {item.due?.prefix || ''} {item.due?.consecutive || ''}
+                                  {item.due?.date && <span className="text-xs text-muted-foreground ml-2">({new Date(item.due.date).toLocaleDateString('es-CO')})</span>}
+                                </span>
+                                <span className="whitespace-nowrap">${Number(item.value || 0).toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
+                              </div>
+                            ))}
+                            
+                            <div className="flex justify-between pt-2 border-t mt-2 font-bold text-lg">
+                              <span>Total:</span>
+                              <span className="whitespace-nowrap">${Number(selectedInvoice.total || 0).toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
+                            </div>
+                            
+                            {selectedInvoice.observations && (
+                              <div className="pt-2 border-t mt-2">
+                                <p className="font-medium">Observaciones:</p>
+                                <p className="text-sm text-muted-foreground whitespace-pre-wrap">{selectedInvoice.observations}</p>
+                              </div>
+                            )}
+                          </>
+                        ) : selectedInvoice.type === 'RC' ? (
                           // Para recibos de caja, mostrar el balance contable
                           <>
                             <div className="flex justify-between">
@@ -1341,6 +1764,56 @@ function ClientSideConsultarFacturas() {
                                 {Number(selectedInvoice.total || 0) === 0 ? '✓ Balanceado' : `$${Number(selectedInvoice.total || 0).toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}`}
                               </span>
                             </div>
+                          </>
+                        ) : selectedInvoice.type === 'FC' ? (
+                          // Para facturas de compra (FC), mostrar un resumen simplificado
+                          <>
+                            <div className="flex justify-between border-b pb-2">
+                              <span className="font-medium">Subtotal:</span>
+                              <span className="whitespace-nowrap font-medium">
+                                ${(Number(selectedInvoice.total || 0) - (Number(selectedInvoice.tax || 0)) - (Number(selectedInvoice.discount || 0)))
+                                  .toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}
+                              </span>
+                            </div>
+                            
+                            {selectedInvoice.discount && Number(selectedInvoice.discount) > 0 && (
+                              <div className="flex justify-between py-1">
+                                <span>Descuento:</span>
+                                <span className="text-red-600 whitespace-nowrap">
+                                  -${Number(selectedInvoice.discount || 0).toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}
+                                </span>
+                              </div>
+                            )}
+                            
+                            {selectedInvoice.tax && Number(selectedInvoice.tax) > 0 && (
+                              <div className="flex justify-between py-1">
+                                <span>IVA:</span>
+                                <span className="whitespace-nowrap">${Number(selectedInvoice.tax || 0).toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
+                              </div>
+                            )}
+                            
+                            {selectedInvoice.retentions?.length > 0 && (
+                              <div className="flex justify-between py-1">
+                                <span>Retenciones:</span>
+                                <span className="text-red-600 whitespace-nowrap">
+                                  -${selectedInvoice.retentions.reduce((sum: number, retention: any) => 
+                                    sum + Number(retention.value || retention.amount || 0), 0)
+                                    .toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}
+                                </span>
+                              </div>
+                            )}
+                            
+                            <div className="flex justify-between pt-2 border-t mt-2 font-bold text-lg">
+                              <span>Total:</span>
+                              <span className="whitespace-nowrap">${Number(selectedInvoice.total || 0).toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
+                            </div>
+                            
+                            {selectedInvoice.balance !== undefined && Number(selectedInvoice.balance) > 0 && (
+                              <div className="flex justify-between pt-2 border-t mt-2">
+                                <span className="font-medium">Saldo pendiente:</span>
+                                <span className="text-amber-600 whitespace-nowrap font-medium">${Number(selectedInvoice.balance).toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
+                              </div>
+                            )}
                           </>
                         ) : (
                           // Para otros tipos de documentos, mostrar el resumen normal
