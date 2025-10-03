@@ -18,6 +18,7 @@ import {
   CheckCircle2 as CheckCircledIcon, 
   AlertTriangle as ExclamationTriangleIcon 
 } from 'lucide-react';
+import { FormaPagoSelector } from './FormaPagoSelector';
 
 // Constantes de configuración para Siigo
 const SIIGO_CONFIG = {
@@ -180,6 +181,15 @@ interface Provider {
 
 type InvoiceType = 'purchase' | 'sale';
 
+interface Pago {
+  id: string;
+  tipo: 'cuenta' | 'anticipo';
+  cuentaId: string;
+  monto: number;
+  nombre: string;
+  saldoDisponible?: number;
+}
+
 interface InvoiceState {
   invoiceType: InvoiceType;
   provider: Provider | null;
@@ -198,6 +208,14 @@ interface InvoiceState {
   currency?: string;
   currencyExchangeRate?: number;
   seller?: number;
+  pagos: Array<{
+    id: string;
+    tipo: 'cuenta' | 'anticipo';
+    cuentaId: string;
+    monto: number;
+    nombre: string;
+    saldoDisponible?: number;
+  }>;
   paymentMethod?: string;
   dueDate?: string;
   stamp?: {
@@ -251,11 +269,14 @@ type InvoiceFormAction =
   | { type: 'SET_PROVIDER_INVOICE_NUMBER'; payload: string }
   | { type: 'SET_CUFE'; payload: string }
   | { type: 'SET_CURRENCY'; payload: string }
+  | { type: 'ADD_PAGO'; payload: Pago }
+  | { type: 'REMOVE_PAGO'; payload: string }
+  | { type: 'UPDATE_PAGO'; payload: { id: string; field: keyof Pago; value: any } }
   | { type: 'RESET_FORM' };
 
 // El tipo facturas formlario se define arriba 
 
-import { calculateSubtotal, calculateIVA, mapItemTypeToSiigoType } from './buildSiigoPayload';
+import { calculateSubtotal, calculateIVA, mapItemTypeToSiigoType, SiigoPayload } from './buildSiigoPayload';
 
 const calculateTotal = (items: InvoiceItem[], ivaPercentage: number): number => {
   const subtotal = calculateSubtotal(items);
@@ -274,22 +295,24 @@ const initialState: InvoiceState = {
   providerInvoiceNumber: '',
   providerInvoicePrefix: 'FC',
   observations: '',
-  ivaPercentage: SIIGO_CONFIG.TAXES.IVA_19.percentage,
+  ivaPercentage: 19,
   providerCode: '',
   providerIdentification: '',
-  costCenter: '1',
+  costCenter: '',
+  cufe: '',
   currency: 'COP',
   currencyExchangeRate: 1,
-  seller: 1, // ID del vendedor por defecto
-  paymentMethod: SIIGO_CONFIG.PAYMENT_METHODS[0].id, // Método de pago por defecto (el primero de la lista)
-  dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 días a partir de hoy
+  seller: 1,
+  pagos: [],
+  paymentMethod: '1',
+  dueDate: new Date().toISOString().split('T')[0],
   stamp: { send: true },
   mail: { send: true },
   saleDocumentType: 'FV',
   rcDocumentId: undefined,
   rcItems: [],
-  rcPaymentId: undefined
-  , rcType: 'DebtPayment'
+  rcPaymentId: undefined,
+  rcType: 'DebtPayment'
 };
 
 const invoiceFormReducer = (state: InvoiceState, action: InvoiceFormAction): InvoiceState => {
@@ -303,7 +326,9 @@ const invoiceFormReducer = (state: InvoiceState, action: InvoiceFormAction): Inv
         customer: action.payload === 'sale' ? state.customer : null,
         providerInvoicePrefix: action.payload === 'purchase' ? 'FC' : 'FV',
         // Al cambiar entre compra/venta, mantener por defecto FV para ventas
-        saleDocumentType: action.payload === 'sale' ? 'FV' : state.saleDocumentType
+        saleDocumentType: action.payload === 'sale' ? 'FV' : state.saleDocumentType,
+        // Resetear los pagos al cambiar el tipo de factura
+        pagos: []
       };
     case 'ADD_ITEM':
       return { ...state, items: [...state.items, action.payload] };
@@ -340,6 +365,25 @@ const invoiceFormReducer = (state: InvoiceState, action: InvoiceFormAction): Inv
       return { ...state, cufe: action.payload };
     case 'SET_CURRENCY':
       return { ...state, currency: action.payload };
+    case 'ADD_PAGO':
+      return {
+        ...state,
+        pagos: [...state.pagos, action.payload]
+      };
+    case 'REMOVE_PAGO':
+      return {
+        ...state,
+        pagos: state.pagos.filter(pago => pago.id !== action.payload)
+      };
+    case 'UPDATE_PAGO':
+      return {
+        ...state,
+        pagos: state.pagos.map(pago =>
+          pago.id === action.payload.id
+            ? { ...pago, [action.payload.field]: action.payload.value }
+            : pago
+        )
+      };
     case 'RESET_FORM':
       return { ...initialState };
     default:
@@ -359,13 +403,14 @@ export function FormularioFacturas() {
   const [_paymentOptions, _setPaymentOptions] = useState<unknown[]>([]); // usar tipo concreto si se conoce
   const [fvDocs, setFvDocs] = useState<SiigoSaleDocumentResponse[]>([]);
   const [loadingFv, setLoadingFv] = useState(false);
+  const [pagos, setPagos] = useState<Array<{ id: string; value: number; metodo: string; paymentMethodId: number }>>([]);
 // El estado de carga no se utiliza actualmente, pero se guarda para uso futuro.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<{ success: boolean; message: string } | null>(null);
 
-  // Cargar tipos de documento RC y medios de pago (si hay endpoint de pagos disponible en backend)
+  // Cargar tipos de documento RC y medios de pago
   useEffect(() => {
     const load = async () => {
       try {
@@ -1271,38 +1316,50 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
           </Card>
         )}
 
-        {/* Totales */}
+        {/* Forma de Pago */}
         <Card>
           <CardHeader>
-            <CardTitle>Resumen de Totales</CardTitle>
+            <CardTitle>Forma de Pago</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              <div className="flex justify-between">
-                <span>Subtotal:</span>
-                <span className="font-medium">
-                  ${calculateSubtotal(state.items).toLocaleString("es-CO", { minimumFractionDigits: 2 })} {state.currency || 'COP'}
-                </span>
+            <FormaPagoSelector
+              onPagosChange={setPagos}
+              total={calculateTotal(state.items, state.ivaPercentage)}
+              documentType={state.invoiceType === 'purchase' ? 'FC' : state.saleDocumentType || 'FV'}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Resumen de totales */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Resumen</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <div className="flex justify-between">
+              <span>Subtotal:</span>
+              <span className="font-medium">
+                ${calculateSubtotal(state.items).toLocaleString("es-CO", { minimumFractionDigits: 2 })} {state.currency || 'COP'}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>IVA ({state.ivaPercentage}%):</span>
+              <span className="font-medium">
+                ${calculateIVA(state.items, state.ivaPercentage).toLocaleString("es-CO", { minimumFractionDigits: 2 })} {state.currency || 'COP'}
+              </span>
+            </div>
+            {state.invoiceType === 'sale' && state.dueDate && (
+              <div className="flex justify-between text-sm text-muted-foreground">
+                <span>Vencimiento:</span>
+                <span>{new Date(state.dueDate).toLocaleDateString('es-CO')}</span>
               </div>
-              <div className="flex justify-between">
-                <span>IVA ({state.ivaPercentage}%):</span>
-                <span className="font-medium">
-                  ${calculateIVA(state.items, state.ivaPercentage).toLocaleString("es-CO", { minimumFractionDigits: 2 })} {state.currency || 'COP'}
-                </span>
-              </div>
-              {state.invoiceType === 'sale' && state.dueDate && (
-                <div className="flex justify-between text-sm text-muted-foreground">
-                  <span>Vencimiento:</span>
-                  <span>{new Date(state.dueDate).toLocaleDateString('es-CO')}</span>
-                </div>
-              )}
-              <Separator />
-              <div className="flex justify-between text-lg font-bold">
-                <span>Total:</span>
-                <span className="text-green-600">
-                  ${calculateTotal(state.items, state.ivaPercentage).toLocaleString("es-CO", { minimumFractionDigits: 2 })} {state.currency || 'COP'}
-                </span>
-              </div>
+            )}
+            <Separator />
+            <div className="flex justify-between text-lg font-bold">
+              <span>Total:</span>
+              <span className="text-green-600">
+                ${calculateTotal(state.items, state.ivaPercentage).toLocaleString("es-CO", { minimumFractionDigits: 2 })} {state.currency || 'COP'}
+              </span>
             </div>
           </CardContent>
         </Card>
