@@ -156,12 +156,6 @@ export interface SiigoInvoiceRequest {
   };
 }
 
-export interface SiigoAuthResponse {
-  access_token: string;
-  expires_in: number;
-  token_type: string;
-}
-
 export interface SiigoExpenseRequest {
   document: SiigoDocument;
   date: string;
@@ -177,4 +171,110 @@ export interface SiigoExpenseRequest {
     value: number;
     due_date: string;
   };
+}
+
+// Tipos para errores de autenticación con detalles específicos
+export interface SiigoErrorDetails {
+  status?: number;
+  response?: unknown;
+  details?: {
+    status?: number;
+    [key: string]: unknown;
+  };
+}
+
+// Tipos para documentos genéricos de respuesta de Siigo
+export interface SiigoDocumentResponse {
+  id: string | number;
+  number?: string | number;
+  name?: string;
+  date?: string;
+  total?: number;
+  balance?: number;
+  items?: SiigoDocumentItem[];
+  [key: string]: unknown; // Para propiedades adicionales
+}
+
+// Tipo específico para ítems de documentos de recibos de pago (RP)
+export interface SiigoPaymentReceiptItem {
+  value: number | string;
+  account?: {
+    movement?: 'debit' | 'credit' | string;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+// Unión de tipos de ítems dependiendo del documento
+export type SiigoDocumentItem =
+  | SiigoItem
+  | SiigoPaymentReceiptItem
+  | {
+      type: string;
+      id: string;
+      code: string;
+      description: string;
+      quantity: number;
+      price: number;
+      discount?: {
+        percentage?: number;
+        value?: number;
+      };
+      taxes?: Array<{
+        id: number;
+        name: string;
+        type: string;
+        percentage: number;
+        value: number;
+      }>;
+      total: number;
+      value?: number | string; // Para documentos RP
+      account?: {
+        movement?: 'debit' | 'credit' | string;
+        [key: string]: unknown;
+      };
+    };
+// Tipos específicos para documentos de venta (FV) de la API
+export interface SiigoSaleDocumentResponse {
+  id: string | number;
+  prefix?: string;
+  prefijo?: string;
+  consecutive?: number;
+  numero?: number;
+  number?: number;
+  customer?: {
+    identification?: string;
+    identificacion?: string;
+    name?: string;
+    nombre?: string;
+    [key: string]: unknown;
+  };
+  customer_id?: string | number;
+  balance?: number;
+  saldo?: number;
+  date?: string;
+  fecha?: string;
+  quote?: number;
+  cuota?: number;
+  [key: string]: unknown;
+}
+
+// Tipos para documentos RC (Recibo de Caja)
+export interface SiigoRCDocumentResponse {
+  id: number;
+  code: string;
+  name: string;
+}
+
+// Tipos para respuestas de API de documentos
+export interface SiigoDocumentsResponse {
+  data?: SiigoSaleDocumentResponse[];
+  results?: SiigoSaleDocumentResponse[];
+  pagination?: {
+    page?: number;
+    page_size?: number;
+    total?: number;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
 }

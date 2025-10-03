@@ -1,5 +1,5 @@
 import { SiigoApiError } from '../api';
-import { SiigoQueryParams, SiigoApiHeaders, SiigoApiResponse } from '@/types/facturas';
+import type { SiigoApiResponse } from '@/types/facturas';
 
 export const SIIGO_INVOICE_TYPES = {
   FC: 'FC',  // Factura de Venta
@@ -18,7 +18,7 @@ export async function fetchInvoices<T>(
   params: Record<string, string | number | boolean> = {}
 ): Promise<SiigoApiResponse<T[]>> {
   try {
-    const headers: SiigoApiHeaders = {
+    const headers: Record<string, string> = {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json'
     };
@@ -53,7 +53,7 @@ export async function fetchInvoices<T>(
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Error desconocido',
-      status: error instanceof SiigoApiError ? error.code : 500
+      status: error instanceof SiigoApiError ? Number(error.code) : 500
     };
   }
 }

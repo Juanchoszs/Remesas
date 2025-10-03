@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server';
 
 const SIIGO_BASE = (process.env.SIIGO_BASE_URL || 'https://api.siigo.com/v1').replace(/\/$/, '');
-const SIIGO_AUTH = (process.env.SIIGO_AUTH_URL || 'https://api.siigo.com/auth').replace(/\/$/, '');
+const _SIIGO_AUTH = (process.env.SIIGO_AUTH_URL || 'https://api.siigo.com/auth').replace(/\/$/, '');
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes cache TTL
 
-const CACHE_DURATION_MS = 10 * 60 * 1000;
 const PAGE_SIZE_DEFAULT = 50;
 
 //tipos para el api de siigo
@@ -45,7 +44,7 @@ interface PurchaseDiagnostics {
   };
 }
 
-interface AuthRequestBody {
+interface _AuthRequestBody {
   username: string | undefined;
   access_key: string | undefined;
   partner_id?: string;

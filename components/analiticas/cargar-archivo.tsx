@@ -78,7 +78,7 @@ export function CargarArchivo({
   const [cargando, setCargando] = useState(false);
   // const [progreso, setProgreso] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [archivos, setArchivos] = useState<ArchivoCargado[]>([]);
+  const [archivos, setArchivos] = useState  <ArchivoCargado[]>([]);
 
   const detectarTipoDocumento = (nombreArchivo: string): TipoDocumento | 'desconocido' => {
     if (!nombreArchivo) return 'desconocido';

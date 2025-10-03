@@ -10,7 +10,7 @@ interface Voucher {
   number?: string;
   date?: string;
   // Agrega más campos según la documentación de Siigo
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 interface SiigoPagination {
@@ -22,7 +22,7 @@ interface SiigoPagination {
 interface SiigoVoucherResponse {
   results?: Voucher[];
   pagination?: SiigoPagination;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export async function GET(request: Request) {

@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useReducer, useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { InvoiceItem } from "@/types/siigo";
+import { InvoiceItem, SiigoSaleDocumentResponse } from "@/types/siigo";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from '@/components/ui/separator';
 import { Autocomplete, type AutocompleteOption } from '@/components/autocomplete';
@@ -347,7 +347,7 @@ const invoiceFormReducer = (state: InvoiceState, action: InvoiceFormAction): Inv
   }
 };
 
-export default function InvoiceForm() {
+export function FormularioFacturas() {
   const router = useRouter();
   const [state, dispatch] = useReducer(invoiceFormReducer, initialState);
   const DEFAULT_RC_DOCS: Array<{ id: number; code: string; name: string }> = [
@@ -356,8 +356,8 @@ export default function InvoiceForm() {
     { id: 999, code: 'Causación Automática', name: 'Causación Automática' }
   ];
   const [rcDocs, setRcDocs] = useState<Array<{ id: number; code: string; name: string }>>([]);
-  const [paymentOptions, setPaymentOptions] = useState<Array<{ id: number; name: string }>>([]);
-  const [fvDocs, setFvDocs] = useState<any[]>([]);
+  const [_paymentOptions, _setPaymentOptions] = useState<unknown[]>([]); // usar tipo concreto si se conoce
+  const [fvDocs, setFvDocs] = useState<SiigoSaleDocumentResponse[]>([]);
   const [loadingFv, setLoadingFv] = useState(false);
 // El estado de carga no se utiliza actualmente, pero se guarda para uso futuro.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -375,8 +375,12 @@ export default function InvoiceForm() {
         if (docsRes.ok) {
           const docsJson = await docsRes.json();
           const list = (docsJson?.data?.results || docsJson?.data || [])
-            .map((d: any) => ({ id: d.id, code: d.code, name: d.name }))
-            .filter((d: any) => d && d.id);
+  .map((d: { id: number; code: string; name: string }) => ({ 
+    id: d.id, 
+    code: d.code, 
+    name: d.name 
+  }))
+  .filter((d: { id: number }) => d && d.id);
           const finalList = (list && list.length > 0) ? list : DEFAULT_RC_DOCS;
           setRcDocs(finalList);
           if (!state.rcDocumentId && finalList.length > 0) {
@@ -406,9 +410,9 @@ export default function InvoiceForm() {
         const res = await fetch(url, { cache: 'no-store' });
         if (!res.ok) throw new Error('No se pudieron cargar facturas de venta');
         const json = await res.json();
-        const list: any[] = Array.isArray(json?.data) ? json.data : [];
+        const list: SiigoSaleDocumentResponse[] = Array.isArray(json?.data) ? json.data as SiigoSaleDocumentResponse[] : [];
         const id = state.customer.identificacion;
-        const filtered = list.filter((d: any) => {
+        const filtered = list.filter((d: SiigoSaleDocumentResponse) => {
           const cid = d?.customer?.identification || d?.customer?.identificacion || d?.customer_id;
           return String(cid || '').trim() === String(id).trim();
         });
@@ -425,7 +429,6 @@ export default function InvoiceForm() {
   const handleAddItem = useCallback(() => {
     const newItem: InvoiceItem = {
       id: Date.now().toString(),
-// ... (el resto del código sigue siendo el mismo)
       type: 'product',
       code: '',
       description: '',
@@ -576,11 +579,11 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
     if (state.invoiceType === 'purchase') {
       // Lógica para factura de compra
       const codigoProveedor = state.provider?.codigo || state.provider?.identificacion || '';
-      const branchOffice = state.provider?.branch_office ?? 0;
+      const _branchOffice = state.provider?.branch_office ?? 0; // Prefixed with _ to indicate intentionally unused
 
     // Mapear los ítems al formato de Siigo
     const items = state.items.map((item: InvoiceItem) => {
-      const itemSubtotal = (item.quantity || 0) * (item.price || 0);
+      const _itemSubtotal = (item.quantity || 0) * (item.price || 0); // Prefixed with _ to indicate intentionally unused
       const discount = item.discount?.value || 0;
       
       return {
@@ -596,14 +599,14 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
       };
     });
 
-    const total = calculateTotal(state.items, state.ivaPercentage);
+    const _total = calculateTotal(state.items, state.ivaPercentage);
 
-    const payments = [{
-      id: 8467, // ID del método de pago configurado en Siigo
-      name: "OTROS",
-      value: total,
-      due_date: fechaFormateada
-    }];
+    // No crear pagos automáticamente para evitar la creación de recibos de pago no deseados
+    const payments: Array<{
+      id: number;
+      value: number;
+      due_date?: string;
+    }> = [];
 
       // Payload para factura de compra
       return {
@@ -1160,14 +1163,14 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
                 value={(state.rcItems || []).map((rc) => `${rc.due.prefix || ''}-${rc.due.consecutive || ''}`)}
                 onChange={(e) => {
                   const values = Array.from(e.currentTarget.selectedOptions).map((o) => o.value);
-                  const selectedDocs = fvDocs.filter((d: any) => {
+                  const selectedDocs = fvDocs.filter((d: SiigoSaleDocumentResponse) => {
                     const prefix = d?.prefix || d?.prefijo || 'FV-1';
                     const consecutive = d?.consecutive || d?.numero || d?.number || 0;
                     return values.includes(`${prefix}-${consecutive}`);
                   });
                   // Mantener valores existentes para facturas ya seleccionadas
                   const existing = (state.rcItems || []);
-                  const next = selectedDocs.map((d: any) => {
+                  const next = selectedDocs.map((d: SiigoSaleDocumentResponse) => {
                     const prefix = d?.prefix || d?.prefijo || 'FV-1';
                     const consecutive = Number(d?.consecutive || d?.numero || d?.number || 0);
                     const quote = Number(d?.quote || d?.cuota || 1);
@@ -1179,7 +1182,7 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
                   dispatch({ type: 'UPDATE_FIELD', payload: { field: 'rcItems', value: next as unknown as never } });
                 }}
               >
-                {fvDocs.map((d: any, i: number) => {
+                {fvDocs.map((d: SiigoSaleDocumentResponse, i: number) => {
                   const prefix = d?.prefix || d?.prefijo || 'FV-1';
                   const consecutive = d?.consecutive || d?.numero || d?.number || 0;
                   const fecha = d?.date || d?.fecha || '';
@@ -1200,7 +1203,7 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
                       className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                       value={`${rc.due.prefix || ''}-${rc.due.consecutive || ''}`}
                       onChange={(e) => {
-                        const found = fvDocs.find((d: any) => {
+                        const found = fvDocs.find((d: SiigoSaleDocumentResponse) => {
                           const prefix = d?.prefix || d?.prefijo || 'FV-1';
                           const consecutive = d?.consecutive || d?.numero || d?.number || 0;
                           return `${prefix}-${consecutive}` === e.target.value;
@@ -1216,7 +1219,7 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
                       }}
                     >
                       <option value="">{loadingFv ? 'Cargando facturas...' : 'Seleccione una factura'}</option>
-                      {fvDocs.map((d: any, i: number) => {
+                      {fvDocs.map((d: SiigoSaleDocumentResponse, i: number) => {
                         const prefix = d?.prefix || d?.prefijo || 'FV-1';
                         const consecutive = d?.consecutive || d?.numero || d?.number || 0;
                         const fecha = d?.date || d?.fecha || '';

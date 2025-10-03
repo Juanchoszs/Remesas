@@ -1,6 +1,15 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+
+interface ApiResponse<T = unknown> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  results?: T[];
+  [key: string]: unknown;
+}
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 
@@ -10,19 +19,14 @@ import { useSiigoAuth } from '@/hooks/useSiigoAuth';
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Calendar as CalendarComponent } from '@/components/ui/calendar';
-import { format, subDays, isSameDay } from 'date-fns';
+import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { FileText, Search, Loader2, Calendar as CalendarIcon, Eye, RefreshCw } from 'lucide-react';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { cn } from '@/lib/utils';
+import { FileText, Search, Loader2, Eye, RefreshCw } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -30,10 +34,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { InvoiceType } from '@/types/invoice';
 
 // Using the imported InvoiceType from types
 
@@ -139,6 +142,39 @@ interface Invoice {
     [key: string]: unknown;
   };
   [key: string]: any; // For any additional properties
+}
+
+// Definir la interfaz para documentos Siigo
+interface SiigoDocument {
+  id?: string;
+  number?: string;
+  code?: string;
+  consecutive?: number;
+  date?: string;
+  items?: Array<{
+    id?: string;
+    code?: string;
+    description?: string;
+    quantity?: number;
+    price?: number;
+    total?: number;
+    account?: {
+      code: string;
+      movement: string;
+    };
+  }>;
+  customer?: {
+    id?: string;
+    name?: string;
+    identification?: string;
+  };
+  supplier?: {
+    id?: string;
+    name?: string;
+    identification?: string;
+    branch_office?: number;
+  };
+  [key: string]: unknown;
 }
 
 // <H></H>elper function to get status information
@@ -357,15 +393,10 @@ function ClientSideConsultarFacturas() {
   const { fetchWithAuth, loading: authLoading } = useSiigoAuth();
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
-  const [searchPerformed, setSearchPerformed] = useState(false);
-  const [filters, setFilters] = useState({
-    status: '',
-    minAmount: '',
-    maxAmount: ''
-  });
+  const [_searchPerformed, setSearchPerformed] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const clearFilters = () => {
+  const _clearFilters = () => {
     setSelectedType('FC');
     setInvoices([]);
     setSearchPerformed(false);
@@ -889,14 +920,18 @@ function ClientSideConsultarFacturas() {
       if (selectedDocType.id === 'RC') {
         endpoint = `/api/siigo/vouchers`;
         // Para vouchers, no necesitamos parámetros adicionales ya que están hardcodeados en la ruta
-        const result = await fetchWithAuth(endpoint);
+        interface VoucherResponse extends ApiResponse {
+          vouchers?: any[];
+        }
         
-        if (!result || result.success === false) {
+        const result = await fetchWithAuth<VoucherResponse>(endpoint);
+        
+        if (!result || result?.success === false) {
           console.error('Error in response:', result);
           throw new Error(result?.error || 'Error al procesar la respuesta');
         }
         
-        const raw = result.vouchers || [];
+        const raw = result?.vouchers || [];
         const documents: any[] = Array.isArray(raw) ? raw : [];
         const formattedInvoices: Invoice[] = documents.map((doc: any) => {
           // Mapear los datos de vouchers al formato de Invoice
@@ -908,7 +943,7 @@ function ClientSideConsultarFacturas() {
             ? doc.items.map((item: any): InvoiceItem => {
                 const value = Number(item.value || 0);
                 const movement = item.account?.movement;
-                const isCredit = movement === 'Credit';
+                const _isCredit = movement === 'Credit';
                 const isDebit = movement === 'Debit';
                 
                 return {
@@ -1010,7 +1045,7 @@ function ClientSideConsultarFacturas() {
             total: Math.abs(computedTotal || 0),
             tax: Math.abs(Number(doc.tax ?? 0)),
             discount: Math.abs(Number(doc.discount ?? 0)),
-            status: String(doc.status || 'draft').toLowerCase() as Invoice['status'],
+            status: status,
             created_at: doc.created_at || new Date().toISOString(),
             updated_at: doc.updated_at || undefined,
             items,
@@ -1035,7 +1070,7 @@ function ClientSideConsultarFacturas() {
         return;
       }
       
-      const result = await fetchWithAuth(`${endpoint}?${params.toString()}`);
+      const result = await fetchWithAuth<ApiResponse<Invoice[]>>(`${endpoint}?${params.toString()}`);
       
       if (!result || result.success === false) {
         console.error('Error in response:', result);
@@ -1043,7 +1078,9 @@ function ClientSideConsultarFacturas() {
       }
       
       const raw = result.data || [];
-      const documents: any[] = Array.isArray(raw) ? raw : (raw.results || []);
+      const documents: SiigoDocument[] = Array.isArray(raw)
+        ? raw
+        : (typeof raw === 'object' && raw !== null && Array.isArray((raw as any).results) ? (raw as any).results : []);
       const formattedInvoices: Invoice[] = documents.map((doc: any) => {
         const docType = doc.type || doc?.document_type?.code || selectedType;
         const party = doc.customer || doc.supplier || doc.third || doc.payer || {};
@@ -1163,27 +1200,6 @@ function ClientSideConsultarFacturas() {
     }
   }, [authLoading, fetchWithAuth, selectedType]);
 
-  const formatCurrency = (value: number, currency: string = 'COP') => {
-    // Format the number with 2 decimal places first
-    let formatted = value.toFixed(2);
-    
-    // Remove trailing zeros and optional decimal point
-    formatted = formatted.replace(/\.?0+$/, '');
-    
-    // Add thousand separators
-    const parts = formatted.split('.');
-    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-    
-    formatted = parts.join('.');
-    
-    // Add currency symbol for COP
-    if (currency === 'COP') {
-      return `$${formatted}`;
-    }
-    
-    // For other currencies, use the formatted value with currency code
-    return `${formatted} ${currency}`;
-  };
   
   const formatDate = (dateString: string, includeTime: boolean = false) => {
     if (!dateString) return 'N/A';
@@ -1198,10 +1214,6 @@ function ClientSideConsultarFacturas() {
   };
 
 
-  const handleViewInvoice = (invoice: Invoice) => {
-    setSelectedInvoice(invoice);
-    setIsViewerOpen(true);
-  };
 
   const closeViewer = () => {
     setIsViewerOpen(false);
@@ -1706,7 +1718,7 @@ function ClientSideConsultarFacturas() {
                         {selectedInvoice.observations && (
                           <div className="border rounded-lg p-3">
                             <p className="font-medium">Observaciones:</p>
-                            <p className="text-muted-foreground">{selectedInvoice.observations}</p>
+                            <p className="text-sm text-muted-foreground whitespace-pre-wrap">{selectedInvoice.observations}</p>
                           </div>
                         )}
                         

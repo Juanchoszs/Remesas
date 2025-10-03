@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchSiigoWithAuth } from '@/lib/siigo/api-utils';
 import { withSiigoAuth } from '@/lib/siigo/api-utils';
@@ -54,15 +55,9 @@ export async function POST(request: NextRequest) {
         ...( (body as any).provider_invoice.number !== undefined ? { number: String((body as any).provider_invoice.number) } : {} ),
       } : undefined;
 
-      // Siigo requiere el campo payments en FC. Por defecto lo incluimos, salvo que explícitamente se envíe include_payments=false
-      const includePayments = (body as any)?.include_payments !== false;
-      const payments = Array.isArray((body as any)?.payments)
-        ? (body as any).payments.map((p: any) => ({
-            id: Number(p.id),
-            value: Number(p.value),
-            ...(p.due_date ? { due_date: String(p.due_date) } : {})
-          }))
-        : [];
+      // Deshabilitar pagos automáticos para evitar la creación de recibos no deseados
+      const includePayments = false;
+      const payments: any[] = [];
 
       const items = Array.isArray((body as any)?.items)
         ? (body as any).items.map((item: any) => {

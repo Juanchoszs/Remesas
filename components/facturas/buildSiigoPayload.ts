@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 export interface SiigoPayload {
   // Define the structure of the Siigo payload here
   [key: string]: any;
@@ -10,53 +11,53 @@ export const buildSiigoPayload = (state: any): SiigoPayload => {
   if (state.invoiceType === 'purchase') {
     // Lógica para factura de compra
     const codigoProveedor = state.provider?.codigo || state.provider?.identificacion || '';
-    const branchOffice = state.provider?.branch_office ?? 0;
+    const _branchOffice = state.provider?.branch_office ?? 0;
 
     // Variables para cálculos
     let subtotal = 0;
     let totalIva = 0;
-    let totalDescuentos = 0;
+    let _totalDescuentos = 0;
 
     // Mapear los ítems al formato de Siigo
-    const items = state.items.map((item: any) => {
-      const quantity = Number(item.quantity) || 1;
-      const price = Number(item.price) || 0;
+    const items = state.items.map((item: unknown) => {
+      const quantity = Number((item as any).quantity) || 1;
+      const price = Number((item as any).price) || 0;
       const itemSubtotal = quantity * price;
       
       // Calcular descuento (puede ser porcentaje o valor fijo)
       let discount = 0;
-      if (item.discount) {
-        if (item.discount.type === 'percentage') {
-          discount = itemSubtotal * (Number(item.discount.value) / 100);
+      if ((item as any).discount) {
+        if ((item as any).discount.type === 'percentage') {
+          discount = itemSubtotal * (Number((item as any).discount.value) / 100);
         } else {
-          discount = Number(item.discount.value) || 0;
+          discount = Number((item as any).discount.value) || 0;
         }
       }
       
       // Calcular subtotal e IVA
       const itemSubtotalConDescuento = itemSubtotal - discount;
       subtotal += itemSubtotalConDescuento;
-      totalDescuentos += discount;
+      _totalDescuentos += discount;
       
       // Calcular IVA si aplica
       let itemIva = 0;
-      if (item.hasIVA) {
+      if ((item as any).hasIVA) {
         itemIva = itemSubtotalConDescuento * (state.ivaPercentage / 100);
         totalIva += itemIva;
       }
       
       // Estructura de ítem según documentación de Siigo
       const itemPayload: any = {
-        type: mapItemTypeToSiigoType(item.type),
-        code: item.code || `ITEM-${Date.now()}`,
-        description: item.description || 'Producto sin descripción',
+        type: mapItemTypeToSiigoType((item as any).type),
+        code: (item as any).code || `ITEM-${Date.now()}`,
+        description: (item as any).description || 'Producto sin descripción',
         quantity: quantity,
         price: price,
         discount: discount
       };
 
       // Agregar impuestos si corresponde
-      if (item.hasIVA) {
+      if ((item as any).hasIVA) {
         itemPayload.taxes = [{
           id: 18384 // ID del impuesto IVA en Siigo
           // No incluimos 'value' ni 'type' ya que no son necesarios según la documentación

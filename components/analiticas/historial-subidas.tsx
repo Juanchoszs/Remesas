@@ -104,7 +104,6 @@ export function HistorialSubidas({ documentType = "ALL", onDeleted }: HistorialS
 
   useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
   const formatMoney = (v: number) =>

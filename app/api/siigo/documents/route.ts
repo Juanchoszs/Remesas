@@ -1,6 +1,54 @@
 import { NextResponse } from 'next/server';
 import { obtenerTokenSiigo, SiigoAuthError } from '@/lib/siigo/auth';
 
+// Interfaces para tipos específicos de documentos y errores
+interface SiigoErrorDetails {
+  status?: number;
+  response?: unknown;
+  details?: {
+    status?: number;
+    [key: string]: unknown;
+  };
+}
+
+interface SiigoDocumentItem {
+  value?: number | string;
+  account?: {
+    movement?: 'debit' | 'credit' | string;
+    [key: string]: unknown;
+  };
+  type?: string;
+  id?: string;
+  code?: string;
+  description?: string;
+  quantity?: number;
+  price?: number;
+  discount?: {
+    percentage?: number;
+    value?: number;
+  };
+  taxes?: Array<{
+    id: number;
+    name: string;
+    type: string;
+    percentage: number;
+    value: number;
+  }>;
+  total?: number;
+  [key: string]: unknown;
+}
+
+interface SiigoDocumentResponse {
+  id: string | number;
+  number?: string | number;
+  name?: string;
+  date?: string;
+  total?: number;
+  balance?: number;
+  items?: SiigoDocumentItem[];
+  [key: string]: unknown;
+}
+
 const SIIGO_BASE_URL = process.env.SIIGO_BASE_URL || 'https://api.siigo.com/v1';
 const PARTNER_ID = process.env.SIIGO_PARTNER_ID || 'RemesasYMensajes';
 
@@ -20,12 +68,13 @@ export async function GET(request: Request) {
       token = await obtenerTokenSiigo();
     } catch (e) {
       if (e instanceof SiigoAuthError) {
-        const status = (e as any)?.details?.status;
+        const errorDetails = e as SiigoAuthError & { details?: SiigoErrorDetails };
+        const status = errorDetails?.details?.status;
         if (status === 429) {
           await sleep(1200);
           token = await obtenerTokenSiigo(true);
         } else {
-          return NextResponse.json({ success: false, error: e.message, details: (e as any)?.details }, { status: status || 500 });
+          return NextResponse.json({ success: false, error: e.message, details: errorDetails?.details }, { status: status || 500 });
         }
       } else {
         return NextResponse.json({ success: false, error: 'Error de autenticación desconocido' }, { status: 500 });
@@ -113,14 +162,14 @@ export async function GET(request: Request) {
       );
     }
 
-    let responseData = await response.json();
-    let documents = Array.isArray(responseData) ? responseData : responseData.results || [];
+    let responseData: unknown = await response.json();
+    let documents: SiigoDocumentResponse[] = Array.isArray(responseData) ? responseData as SiigoDocumentResponse[] : (responseData as { results?: SiigoDocumentResponse[] }).results || [];
     
     // Calculate total for RP documents
     if (documentType === 'RP' && Array.isArray(documents)) {
       documents = documents.map(doc => {
         // Calcular la suma de TODOS los ítems sin importar si son débito o crédito
-        const total = doc.items?.reduce((sum: number, item: any) => {
+        const total = doc.items?.reduce((sum: number, item: SiigoDocumentItem) => {
           // Sumar el valor absoluto de todos los ítems
           const value = Math.abs(Number(item.value) || 0);
           console.log(`Sumando ítem:`, { 
@@ -143,7 +192,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       success: true,
       data: documents,
-      pagination: responseData.pagination || null,
+      pagination: (responseData as { pagination?: unknown }).pagination || null,
       type: documentType,
       url: apiUrl.toString()
     });

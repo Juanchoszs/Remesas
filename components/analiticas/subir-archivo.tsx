@@ -1,35 +1,21 @@
 'use client';
 
-// Importaciones de bibliotecas y componentes necesarios
 import React, { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import Link from 'next/link';
-
 import { 
   AlertCircle, 
   FileText, 
   Upload, 
   X, 
   CheckCircle2, 
-  Loader2, 
-  FileSpreadsheet,
+  Loader2,
   RefreshCw 
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { DocumentType, documentTypeNames, documentTypeColors } from '@/types/document.types';
 import type { TimeRange } from './AnalyticsChart';
-
-// Asegurarnos de que JSX esté disponible
-declare global {
-  namespace JSX {
-    interface Element {}
-    interface IntrinsicElements { [key: string]: any; }
-  }
-}
 
 // Interfaz para las propiedades del componente
 interface FileUploadProps {
@@ -56,7 +42,6 @@ interface ProcessedData {
     processedRows?: number;
     [key: string]: unknown;
   };
-  [key: string]: unknown;
 }
 
 interface UploadedFileData {
@@ -68,16 +53,10 @@ interface UploadedFileData {
   debugInfo?: Record<string, unknown>;
 }
 
-
 // Componente para la carga de archivos
 export function FileUpload({ onFileProcessed, onUploadComplete, documentType, timeRange }: FileUploadProps) {
-  // Estados para manejar los archivos cargados
   const [files, setFiles] = useState<UploadedFileData[]>([]);
-  // Estados para manejar la carga y el progreso
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [fileData, setFileData] = useState<UploadedFileData | null>(null);
 
   // Función para detectar el tipo de documento desde el nombre del archivo
   const detectDocumentType = (filename: string): DocumentType | 'unknown' => {
