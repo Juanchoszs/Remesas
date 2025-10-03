@@ -66,6 +66,7 @@ function resolveBasePath(typeParam: string | null) {
     case 'DS':
       return 'support-documents';
     case 'RP':
+    case 'DEBTPAYMENT':
       return 'payment-receipts';
     default:
       return 'invoices';

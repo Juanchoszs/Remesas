@@ -97,7 +97,7 @@ interface SiigoResponse<T = Record<string, unknown>> {
   [key: string]: unknown;
 }
 
-interface ApiResponse {
+interface _ApiResponse {
   success: boolean;
   purchases: Purchase[];
   count: number;
@@ -553,7 +553,7 @@ function getCacheKey(year: number, pageSize: number, filters: Record<string, unk
   return `purchases_${year}_${pageSize}_${filtersStr}`;
 }
 
-async function fetchAllPurchasesWithDiagnostics(
+async function _fetchAllPurchasesWithDiagnostics(
   year: number, 
   pageSize: number = 100, 
   additionalFilters: PurchaseFilters = {}

@@ -26,7 +26,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { FileText, Search, Loader2, Eye, RefreshCw } from 'lucide-react';
+import { FileText, Search, Loader2, Eye, RefreshCw, Trash2 } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -198,7 +198,15 @@ const getStatusInfo = (status: string) => {
 };
 
 // Componente para mostrar una fila de factura de compra (FC)
-const FCRow = ({ invoice, onView }: { invoice: Invoice, onView: () => void }) => {
+const FCRow = ({ 
+  invoice, 
+  onView, 
+  onDelete 
+}: { 
+  invoice: Invoice, 
+  onView: () => void, 
+  onDelete: (id: string) => Promise<void> 
+}) => {
   const statusInfo = getStatusInfo(invoice.status);
   
   return (
@@ -316,16 +324,30 @@ const FCRow = ({ invoice, onView }: { invoice: Invoice, onView: () => void }) =>
         </Tooltip>
       </TableCell>
       <TableCell className="text-right">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-9 w-9 rounded-full hover:bg-primary/10 hover:text-primary transition-colors group relative"
-          onClick={onView}
-          title="Ver detalles de la factura"
-        >
-          <Eye className="h-4 w-4 group-hover:scale-110 transition-transform" />
-          <span className="sr-only">Ver detalles de la factura</span>
-        </Button>
+        <div className="flex justify-end space-x-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 rounded-full hover:bg-primary/10 hover:text-primary transition-colors group relative"
+            onClick={onView}
+            title="Ver detalles de la factura"
+          >
+            <Eye className="h-4 w-4 group-hover:scale-110 transition-transform" />
+            <span className="sr-only">Ver detalles de la factura</span>
+          </Button>
+          
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 rounded-full hover:bg-destructive/10 hover:text-destructive transition-colors group relative"
+            onClick={() => onDelete(invoice.id)}
+            title="Eliminar factura"
+            disabled={invoice.status === 'posted' || invoice.status === 'paid'}
+          >
+            <Trash2 className="h-4 w-4 group-hover:scale-110 transition-transform" />
+            <span className="sr-only">Eliminar factura</span>
+          </Button>
+        </div>
       </TableCell>
     </TableRow>
   );
@@ -395,6 +417,7 @@ function ClientSideConsultarFacturas() {
   const [isViewerOpen, setIsViewerOpen] = useState(false);
   const [_searchPerformed, setSearchPerformed] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState<Record<string, boolean>>({});
 
   const _clearFilters = () => {
     setSelectedType('FC');
@@ -402,6 +425,51 @@ function ClientSideConsultarFacturas() {
     setSearchPerformed(false);
     setError(null);
   };
+
+  // Función para manejar la eliminación de facturas
+  const handleDeleteInvoice = useCallback(async (invoiceId: string) => {
+    if (!invoiceId) {
+      toast.error('ID de factura no válido');
+      return;
+    }
+
+    try {
+      setIsDeleting(prev => ({ ...prev, [invoiceId]: true }));
+      
+      // Mostrar confirmación
+      const confirmDelete = window.confirm('¿Estás seguro de que deseas eliminar esta factura? Esta acción no se puede deshacer.');
+      if (!confirmDelete) {
+        setIsDeleting(prev => ({ ...prev, [invoiceId]: false }));
+        return;
+      }
+
+      // Obtener el tipo de documento para construir la URL correcta
+      const invoiceToDelete = invoices.find(inv => inv.id === invoiceId);
+      const docType = invoiceToDelete?.document_type?.code || 'FC';
+      
+      const response = await fetch(`/api/siigo/documents/${invoiceId}?type=${docType}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Error al eliminar la factura');
+      }
+
+      // Actualizar la lista de facturas
+      setInvoices(prevInvoices => prevInvoices.filter(inv => inv.id !== invoiceId));
+      
+      toast.success('Factura eliminada correctamente');
+    } catch (error) {
+      console.error('Error al eliminar la factura:', error);
+      toast.error(`Error al eliminar la factura: ${error instanceof Error ? error.message : 'Error desconocido'}`);
+    } finally {
+      setIsDeleting(prev => ({ ...prev, [invoiceId]: false }));
+    }
+  }, [invoices]);
 
   // Función para formatear facturas de compra (FC)
   const formatFCInvoice = (invoice: any) => {
@@ -740,12 +808,12 @@ function ClientSideConsultarFacturas() {
                         onView={() => {
                           setSelectedInvoice(invoice);
                           setIsViewerOpen(true);
-                        }} 
+                        }}
+                        onDelete={handleDeleteInvoice}
                       />
                     );
                   }
                   
-                  // Componente estándar para otros tipos de facturas
                   return (
                     <TableRow key={invoice.id}>
                       <TableCell className="font-medium">

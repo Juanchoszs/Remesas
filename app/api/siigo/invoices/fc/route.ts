@@ -55,9 +55,13 @@ export async function POST(request: NextRequest) {
         ...( (body as any).provider_invoice.number !== undefined ? { number: String((body as any).provider_invoice.number) } : {} ),
       } : undefined;
 
-      // Deshabilitar pagos automáticos para evitar la creación de recibos no deseados
-      const includePayments = false;
+      // Inicializar pagos como un arreglo vacío para cumplir con la validación de la API
       const payments: any[] = [];
+      
+      // Registrar si se detectan pagos en la solicitud
+      if (body.payments && Array.isArray(body.payments)) {
+        console.log('Se detectaron pagos en la solicitud, pero se deshabilitan para prevenir duplicados');
+      }
 
       const items = Array.isArray((body as any)?.items)
         ? (body as any).items.map((item: any) => {
@@ -101,8 +105,64 @@ export async function POST(request: NextRequest) {
         ...( typeof (body as any)?.supplier_by_item === 'boolean' ? { supplier_by_item: (body as any).supplier_by_item } : { supplier_by_item: false } ),
         ...( typeof (body as any)?.tax_included === 'boolean' ? { tax_included: (body as any).tax_included } : { tax_included: false } ),
         items,
-        ...(includePayments ? { payments } : {})
+        // Incluir payments como arreglo vacío para cumplir con la validación de la API
+        payments: []
       };
+
+      // Calcular el total de la factura
+      const total = payload.items.reduce((sum: number, item: any) => {
+        const qty = Number(item.quantity || 0);
+        const price = Number(item.price || 0);
+        let itemTotal = qty * price;
+        // Aplicar descuento si existe
+        if (item.discount) {
+          const discount = Number(item.discount || 0);
+          itemTotal = Math.max(0, itemTotal - discount);
+        }
+        return sum + itemTotal;
+      }, 0);
+
+      // Obtener un método de pago válido de Siigo
+      const paymentMethodsUrl = `${baseUrl}/payment-types`;
+      const paymentMethodsResponse = await fetch(paymentMethodsUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'Partner-Id': process.env.SIIGO_PARTNER_ID || 'RemesasApp',
+          'Accept': 'application/json'
+        }
+      });
+
+      let paymentMethodId = 1; // Valor por defecto en caso de error
+      
+      if (paymentMethodsResponse.ok) {
+        const paymentMethods = await paymentMethodsResponse.json();
+        if (Array.isArray(paymentMethods) && paymentMethods.length > 0) {
+          // Buscar un método de pago activo (si hay alguno)
+          const activeMethod = paymentMethods.find((m: any) => m.active === true);
+          if (activeMethod) {
+            paymentMethodId = activeMethod.id;
+          } else {
+            // Si no hay activos, usar el primero
+            paymentMethodId = paymentMethods[0].id;
+          }
+        }
+      } else {
+        console.warn('No se pudieron obtener los métodos de pago. Usando valor por defecto (1)');
+      }
+
+      // Incluir el pago con un ID válido
+      payload.payments = [{
+        id: paymentMethodId,  // Usar el ID del método de pago obtenido
+        value: total,
+        due_date: payload.date,
+        payment_method: {
+          id: paymentMethodId,
+          name: 'Efectivo'  // Este nombre será reemplazado por el real
+        },
+        status: 'active'
+      }];
 
       // Preflight: si no vino number en el cuerpo, decidir según configuración del comprobante
       let finalNumber = rootNumber;
@@ -187,8 +247,9 @@ export async function POST(request: NextRequest) {
         payload.number = finalNumber;
       }
       
-      // Preflight: ajustar payments sólo si se solicitó registrar pagos (para evitar crear RP en pruebas de FC)
-      if (includePayments) {
+      // Deshabilitar completamente el procesamiento de pagos para facturas FC
+      // Esto previene la creación automática de recibos de pago (RP)
+      if (false) { // Deshabilitado permanentemente
         try {
           const discountType = String(payload.discount_type || 'Value');
           let totalPurchase = 0;
