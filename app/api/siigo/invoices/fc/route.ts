@@ -33,6 +33,36 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     
+    // Validar que vengan los pagos
+    if (!body.pagos || !Array.isArray(body.pagos) || body.pagos.length === 0) {
+      console.error('No se recibieron pagos en la solicitud:', body);
+      return NextResponse.json(
+        { success: false, error: 'Debe proporcionar al menos un método de pago' },
+        { status: 400 }
+      );
+    }
+
+    // Validar que los pagos tengan la estructura correcta
+    const pagosInvalidos = body.pagos.filter((pago: any) => {
+      return !pago || 
+             pago.value === undefined || 
+             pago.payment_method_id === undefined ||
+             isNaN(Number(pago.value)) ||
+             isNaN(Number(pago.payment_method_id));
+    });
+
+    if (pagosInvalidos.length > 0) {
+      console.error('Pagos con formato inválido:', pagosInvalidos);
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Uno o más pagos tienen un formato inválido',
+          detalles: pagosInvalidos 
+        },
+        { status: 400 }
+      );
+    }
+    
     // Endpoint para crear facturas de compra en Siigo
     const endpoint = process.env.SIIGO_PURCHASES_CREATE_URL || 'purchases';
     
@@ -55,12 +85,24 @@ export async function POST(request: NextRequest) {
         ...( (body as any).provider_invoice.number !== undefined ? { number: String((body as any).provider_invoice.number) } : {} ),
       } : undefined;
 
-      // Inicializar pagos como un arreglo vacío para cumplir con la validación de la API
-      const payments: any[] = [];
-      
-      // Registrar si se detectan pagos en la solicitud
-      if (body.payments && Array.isArray(body.payments)) {
-        console.log('Se detectaron pagos en la solicitud, pero se deshabilitan para prevenir duplicados');
+      // Procesar los pagos recibidos
+      const payments = Array.isArray(body.pagos) ? body.pagos.map((pago: any) => ({
+        id: Number(pago.payment_method_id || pago.id || 0),
+        name: String(pago.name || 'Pago'),
+        value: Number(pago.value || 0),
+        due_date: pago.due_date || new Date().toISOString().split('T')[0],
+        payment_method_id: Number(pago.payment_method_id || pago.id || 0)
+      })) : [];
+
+      console.log('Pagos procesados para Siigo:', payments);
+
+      // Validar que haya al menos un pago
+      if (payments.length === 0) {
+        console.error('No se encontraron pagos válidos para procesar');
+        return NextResponse.json(
+          { success: false, error: 'No se encontraron pagos válidos para procesar' },
+          { status: 400 }
+        );
       }
 
       const items = Array.isArray((body as any)?.items)
@@ -105,9 +147,23 @@ export async function POST(request: NextRequest) {
         ...( typeof (body as any)?.supplier_by_item === 'boolean' ? { supplier_by_item: (body as any).supplier_by_item } : { supplier_by_item: false } ),
         ...( typeof (body as any)?.tax_included === 'boolean' ? { tax_included: (body as any).tax_included } : { tax_included: false } ),
         items,
-        // Incluir payments como arreglo vacío para cumplir con la validación de la API
-        payments: []
+        // Usar los pagos procesados
+        payments: payments
       };
+
+      console.log('Payload a enviar a Siigo:', JSON.stringify(payload, null, 2));
+
+      // Validar que los pagos tengan un ID válido
+      if (payload.payments.length > 0) {
+        const invalidPayments = payload.payments.filter((p: any) => !p.id || isNaN(Number(p.id)));
+        if (invalidPayments.length > 0) {
+          console.error('Pagos con ID inválido:', invalidPayments);
+          return NextResponse.json(
+            { success: false, error: 'Uno o más pagos tienen un ID inválido' },
+            { status: 400 }
+          );
+        }
+      }
 
       // Calcular el total de la factura
       const total = payload.items.reduce((sum: number, item: any) => {
@@ -122,47 +178,24 @@ export async function POST(request: NextRequest) {
         return sum + itemTotal;
       }, 0);
 
-      // Obtener un método de pago válido de Siigo
-      const paymentMethodsUrl = `${baseUrl}/payment-types`;
-      const paymentMethodsResponse = await fetch(paymentMethodsUrl, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'Partner-Id': process.env.SIIGO_PARTNER_ID || 'RemesasApp',
-          'Accept': 'application/json'
+      // Asegurarse de que el pago tenga el valor correcto
+      if (payload.payments && payload.payments.length > 0) {
+        // Usar el primer pago (solo debería haber uno)
+        const pago = payload.payments[0];
+        
+        // Asegurarse de que el valor sea un número
+        pago.value = Number(pago.value || total);
+        
+        // Asegurarse de que el ID sea un número
+        pago.id = Number(pago.id);
+        
+        // Asegurarse de que la fecha esté en el formato correcto
+        if (!pago.due_date) {
+          pago.due_date = new Date().toISOString().split('T')[0];
         }
-      });
-
-      let paymentMethodId = 1; // Valor por defecto en caso de error
-      
-      if (paymentMethodsResponse.ok) {
-        const paymentMethods = await paymentMethodsResponse.json();
-        if (Array.isArray(paymentMethods) && paymentMethods.length > 0) {
-          // Buscar un método de pago activo (si hay alguno)
-          const activeMethod = paymentMethods.find((m: any) => m.active === true);
-          if (activeMethod) {
-            paymentMethodId = activeMethod.id;
-          } else {
-            // Si no hay activos, usar el primero
-            paymentMethodId = paymentMethods[0].id;
-          }
-        }
-      } else {
-        console.warn('No se pudieron obtener los métodos de pago. Usando valor por defecto (1)');
+        
+        console.log('Pago configurado:', pago);
       }
-
-      // Incluir el pago con un ID válido
-      payload.payments = [{
-        id: paymentMethodId,  // Usar el ID del método de pago obtenido
-        value: total,
-        due_date: payload.date,
-        payment_method: {
-          id: paymentMethodId,
-          name: 'Efectivo'  // Este nombre será reemplazado por el real
-        },
-        status: 'active'
-      }];
 
       // Preflight: si no vino number en el cuerpo, decidir según configuración del comprobante
       let finalNumber = rootNumber;
