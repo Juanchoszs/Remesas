@@ -9,238 +9,231 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Plus, X } from 'lucide-react';
 
-export interface PagoSiigo {
-  id: number;
+type Cuenta = {
+  id: string;
   name: string;
-  value: number;
-  due_date: string;
-  payment_method_id: number;
-}
+  type: 'bank' | 'cash';
+  number: string;
+  balance?: number;
+};
 
-interface MetodoPago {
-  id: number;
-  name: string;
-  active: boolean;
-}
+type Pago = {
+  id: string;
+  tipo: 'cuenta' | 'anticipo';
+  cuentaId: string;
+  monto: number;
+  nombre: string;
+  saldoDisponible?: number;
+};
 
-interface FormaPagoSelectorProps {
+export function FormaPagoSelector({
+  total,
+  clienteId,
+  onPagosChange,
+  className,
+}: {
   total: number;
-  onPagosChange: (pagos: PagoSiigo[]) => void;
+  clienteId?: string;
+  onPagosChange: (pagos: Array<{ id: string; value: number }>) => void;
   className?: string;
-  documentType?: 'FC' | 'FV' | 'RC';
-}
+}) {
+  const [cuentas, setCuentas] = useState<Cuenta[]>([]);
+  const [pagos, setPagos] = useState<Pago[]>([]);
+  const [cuentaSeleccionada, setCuentaSeleccionada] = useState('');
+  const [monto, setMonto] = useState('');
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState('');
 
-export function FormaPagoSelector({ 
-  total, 
-  onPagosChange, 
-  className = '', 
-  documentType = 'FC' 
-}: FormaPagoSelectorProps) {
-  // Estado para depuración
-  const [debugInfo, setDebugInfo] = useState('');
-  const [pagos, setPagos] = useState<PagoSiigo[]>([]);
-  const [metodoPagoId, setMetodoPagoId] = useState<string>('');
-  const [monto, setMonto] = useState<string>('');
-  const [metodosPago, setMetodosPago] = useState<MetodoPago[]>([]);
-  const [cargando, setCargando] = useState<boolean>(false);
-  const [error, setError] = useState<string>('');
-
-  // Cargar métodos de pago al montar el componente
+  // Cargar cuentas al montar el componente
   useEffect(() => {
-    const cargarMetodosPago = async () => {
+    const cargarCuentas = async () => {
       try {
         setCargando(true);
-        const res = await fetch('/api/siigo/payment-methods');
+        const res = await fetch('/api/siigo/accounts');
         const { data, error } = await res.json();
         
         if (error) throw new Error(error);
-        setMetodosPago(data?.filter((m: any) => m.active) || []);
+        setCuentas(data || []);
       } catch (err) {
-        console.error('Error cargando métodos de pago:', err);
-        setError('No se pudieron cargar los métodos de pago');
+        console.error('Error cargando cuentas:', err);
+        setError('No se pudieron cargar las cuentas. Intente de nuevo.');
       } finally {
         setCargando(false);
       }
     };
 
-    cargarMetodosPago();
+    cargarCuentas();
   }, []);
 
   // Notificar cambios en los pagos
   useEffect(() => {
-    console.log('Pagos actualizados en FormaPagoSelector:', pagos);
-    const debugMsg = `Pagos actualizados: ${JSON.stringify(pagos, null, 2)}`;
-    setDebugInfo(debugMsg);
-    onPagosChange(pagos);
+    onPagosChange(
+      pagos.map(p => ({
+        id: p.cuentaId,
+        value: p.monto,
+        type: p.tipo,
+      }))
+    );
   }, [pagos, onPagosChange]);
 
   const agregarPago = () => {
-    console.log('Agregando pago...', { metodoPagoId, monto });
+    if (!cuentaSeleccionada || !monto) return;
     
-    if (!metodoPagoId || !monto) {
-      const errorMsg = 'Seleccione un método de pago y un monto';
-      console.error(errorMsg);
-      setError(errorMsg);
-      return;
-    }
-
     const montoNum = parseFloat(monto);
     if (isNaN(montoNum) || montoNum <= 0) {
       setError('El monto debe ser mayor a 0');
       return;
     }
 
-    const metodo = metodosPago.find(m => m.id.toString() === metodoPagoId);
-    if (!metodo) {
-      setError('Método de pago no válido');
-      return;
-    }
+    const cuenta = cuentas.find(c => c.id === cuentaSeleccionada);
+    if (!cuenta) return;
 
     // Verificar que no se exceda el total
-    const totalPagado = pagos.reduce((sum, p) => sum + p.value, 0);
+    const totalPagado = pagos.reduce((sum, p) => sum + p.monto, 0);
     if (totalPagado + montoNum > total) {
       setError('El monto total excede el valor de la factura');
       return;
     }
 
-    const nuevoPago: PagoSiigo = {
-      id: metodo.id,
-      name: metodo.name,
-      value: montoNum,
-      due_date: new Date().toISOString().split('T')[0],
-      payment_method_id: metodo.id
+    const nuevoPago: Pago = {
+      id: `pago-${Date.now()}`,
+      tipo: 'cuenta',
+      cuentaId: cuenta.id,
+      monto: montoNum,
+      nombre: cuenta.name,
+      saldoDisponible: cuenta.balance
     };
 
-    const nuevosPagos = [...pagos, nuevoPago];
-    console.log('Nuevo pago agregado:', nuevoPago);
-    console.log('Total de pagos después de agregar:', nuevosPagos);
-    
-    setPagos(nuevosPagos);
+    setPagos([...pagos, nuevoPago]);
     setMonto('');
-    setMetodoPagoId('');
+    setCuentaSeleccionada('');
     setError('');
-    
-    // Forzar actualización del estado
-    onPagosChange(nuevosPagos);
   };
 
-  const eliminarPago = (id: number) => {
-    const nuevosPagos = pagos.filter(p => p.id !== id);
-    console.log('Eliminando pago ID:', id);
-    console.log('Pagos después de eliminar:', nuevosPagos);
-    setPagos(nuevosPagos);
-    // Forzar actualización del estado
-    onPagosChange(nuevosPagos);
+  const eliminarPago = (id: string) => {
+    setPagos(pagos.filter(p => p.id !== id));
   };
 
-  const totalPagado = pagos.reduce((sum, p) => sum + p.value, 0);
+  const totalPagado = pagos.reduce((sum, p) => sum + p.monto, 0);
   const saldoPendiente = total - totalPagado;
 
   return (
     <Card className={className}>
       <CardHeader>
-        <CardTitle>Forma de Pago</CardTitle>
+        <CardTitle>Formas de pago</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <Label>Método de Pago</Label>
-          <Select
-            value={metodoPagoId}
-            onValueChange={setMetodoPagoId}
-            disabled={cargando}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Seleccione un método de pago" />
-            </SelectTrigger>
-            <SelectContent>
-              {metodosPago.map((metodo) => (
-                <SelectItem key={metodo.id} value={metodo.id.toString()}>
-                  {metodo.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="space-y-2">
-          <Label>Monto</Label>
-          <Input
-            type="number"
-            value={monto}
-            onChange={(e) => setMonto(e.target.value)}
-            placeholder="Ingrese el monto"
-            min="0.01"
-            step="0.01"
-            disabled={cargando}
-          />
-        </div>
-
-        <Button
-          type="button"
-          onClick={agregarPago}
-          disabled={!metodoPagoId || !monto || cargando}
-          className="w-full"
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Agregar Pago
-        </Button>
-
-        {error && <p className="text-sm text-red-500">{error}</p>}
-
-        {pagos.length > 0 && (
-          <div className="mt-4 space-y-2">
-            <h4 className="font-medium">Pagos Agregados:</h4>
-            <div className="space-y-2">
-              {pagos.map((pago) => (
-                <div
-                  key={`${pago.id}-${pago.value}`}
-                  className="flex items-center justify-between p-2 border rounded"
-                >
-                  <div>
-                    <p className="font-medium">{pago.name}</p>
-                    <p className="text-sm text-gray-500">
-                      ${pago.value.toLocaleString()} - {pago.due_date}
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => eliminarPago(pago.id)}
-                    className="text-red-500 hover:text-red-700"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
+      <CardContent>
+        <div className="space-y-4">
+          {/* Resumen de pagos */}
+          <div className="grid grid-cols-3 gap-4 mb-4">
+            <div>
+              <p className="text-sm text-muted-foreground">Total factura</p>
+              <p className="text-lg font-semibold">${total.toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Total pagado</p>
+              <p className="text-lg font-semibold text-green-600">${totalPagado.toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Saldo pendiente</p>
+              <p className={`text-lg font-semibold ${saldoPendiente > 0 ? 'text-orange-500' : 'text-green-600'}`}>
+                ${saldoPendiente.toLocaleString()}
+              </p>
             </div>
           </div>
-        )}
 
-        <div className="pt-4 border-t">
-          <div className="flex justify-between">
-            <span>Total Factura:</span>
-            <span className="font-medium">${total.toLocaleString()}</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Total Pagado:</span>
-            <span className="font-medium">${totalPagado.toLocaleString()}</span>
-          </div>
-          <div className="flex justify-between font-bold">
-            <span>Saldo Pendiente:</span>
-            <span className={saldoPendiente > 0 ? 'text-orange-500' : 'text-green-500'}>
-              ${saldoPendiente.toLocaleString()}
-            </span>
+          {/* Lista de pagos agregados */}
+          {pagos.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="text-sm font-medium">Pagos registrados:</h4>
+              <div className="border rounded-md divide-y">
+                {pagos.map(pago => (
+                  <div key={pago.id} className="p-3 flex justify-between items-center">
+                    <div>
+                      <p className="font-medium">{pago.nombre}</p>
+                      {pago.saldoDisponible !== undefined && (
+                        <p className="text-xs text-muted-foreground">
+                          Saldo: ${pago.saldoDisponible?.toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="font-medium">${pago.monto.toLocaleString()}</span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => eliminarPago(pago.id)}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Formulario para agregar pago */}
+          <div className="space-y-4 pt-2">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="cuenta">Cuenta</Label>
+                <Select 
+                  value={cuentaSeleccionada}
+                  onValueChange={setCuentaSeleccionada}
+                  disabled={cargando}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccione una cuenta" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {cuentas.map(cuenta => (
+                      <SelectItem key={cuenta.id} value={cuenta.id}>
+                        <div className="flex items-center justify-between">
+                          <span>{cuenta.name}</span>
+                          <Badge variant="outline" className="ml-2">
+                            {cuenta.type === 'bank' ? 'Banco' : 'Efectivo'}
+                          </Badge>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="monto">Monto</Label>
+                <Input
+                  id="monto"
+                  type="number"
+                  placeholder="0.00"
+                  value={monto}
+                  onChange={(e) => setMonto(e.target.value)}
+                  min="0.01"
+                  step="0.01"
+                  disabled={!cuentaSeleccionada || cargando}
+                />
+              </div>
+
+              <div className="flex items-end">
+                <Button 
+                  type="button" 
+                  onClick={agregarPago}
+                  disabled={!cuentaSeleccionada || !monto || cargando}
+                  className="w-full"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Agregar pago
+                </Button>
+              </div>
+            </div>
+
+            {error && (
+              <p className="text-sm text-red-500">{error}</p>
+            )}
           </div>
         </div>
-        
-        {/* Sección de depuración */}
-        {process.env.NODE_ENV === 'development' && (
-          <div className="mt-4 p-2 bg-gray-100 rounded text-xs text-gray-600">
-            <h4 className="font-bold mb-1">Depuración:</h4>
-            <pre className="whitespace-pre-wrap">{debugInfo}</pre>
-          </div>
-        )}
       </CardContent>
     </Card>
   );

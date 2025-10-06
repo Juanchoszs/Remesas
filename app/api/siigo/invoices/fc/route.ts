@@ -33,36 +33,6 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     
-    // Validar que vengan los pagos
-    if (!body.pagos || !Array.isArray(body.pagos) || body.pagos.length === 0) {
-      console.error('No se recibieron pagos en la solicitud:', body);
-      return NextResponse.json(
-        { success: false, error: 'Debe proporcionar al menos un método de pago' },
-        { status: 400 }
-      );
-    }
-
-    // Validar que los pagos tengan la estructura correcta
-    const pagosInvalidos = body.pagos.filter((pago: any) => {
-      return !pago || 
-             pago.value === undefined || 
-             pago.payment_method_id === undefined ||
-             isNaN(Number(pago.value)) ||
-             isNaN(Number(pago.payment_method_id));
-    });
-
-    if (pagosInvalidos.length > 0) {
-      console.error('Pagos con formato inválido:', pagosInvalidos);
-      return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Uno o más pagos tienen un formato inválido',
-          detalles: pagosInvalidos 
-        },
-        { status: 400 }
-      );
-    }
-    
     // Endpoint para crear facturas de compra en Siigo
     const endpoint = process.env.SIIGO_PURCHASES_CREATE_URL || 'purchases';
     
@@ -85,24 +55,12 @@ export async function POST(request: NextRequest) {
         ...( (body as any).provider_invoice.number !== undefined ? { number: String((body as any).provider_invoice.number) } : {} ),
       } : undefined;
 
-      // Procesar los pagos recibidos
-      const payments = Array.isArray(body.pagos) ? body.pagos.map((pago: any) => ({
-        id: Number(pago.payment_method_id || pago.id || 0),
-        name: String(pago.name || 'Pago'),
-        value: Number(pago.value || 0),
-        due_date: pago.due_date || new Date().toISOString().split('T')[0],
-        payment_method_id: Number(pago.payment_method_id || pago.id || 0)
-      })) : [];
-
-      console.log('Pagos procesados para Siigo:', payments);
-
-      // Validar que haya al menos un pago
-      if (payments.length === 0) {
-        console.error('No se encontraron pagos válidos para procesar');
-        return NextResponse.json(
-          { success: false, error: 'No se encontraron pagos válidos para procesar' },
-          { status: 400 }
-        );
+      // Usar directamente el objeto de pago que viene del frontend
+      // que ya contiene la información correcta de la API de Siigo
+      if (body.payments && Array.isArray(body.payments) && body.payments.length > 0) {
+        console.log('Método de pago recibido del frontend:', body.payments[0]);
+      } else {
+        console.warn('No se recibió información de pago en la solicitud');
       }
 
       const items = Array.isArray((body as any)?.items)
@@ -147,8 +105,15 @@ export async function POST(request: NextRequest) {
         ...( typeof (body as any)?.supplier_by_item === 'boolean' ? { supplier_by_item: (body as any).supplier_by_item } : { supplier_by_item: false } ),
         ...( typeof (body as any)?.tax_included === 'boolean' ? { tax_included: (body as any).tax_included } : { tax_included: false } ),
         items,
-        // Usar los pagos procesados
-        payments: payments
+        // Usar los pagos que vienen del body (ya procesados por buildSiigoPayload)
+        payments: body.payments && Array.isArray(body.payments) && body.payments.length > 0
+          ? [{
+              id: Number(body.payments[0].id),
+              name: String(body.payments[0].name || 'Pago'),
+              value: Number(body.payments[0].value || 0),
+              due_date: body.payments[0].due_date || new Date().toISOString().split('T')[0]
+            }]
+          : []
       };
 
       console.log('Payload a enviar a Siigo:', JSON.stringify(payload, null, 2));
