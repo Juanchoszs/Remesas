@@ -86,17 +86,25 @@ export const buildSiigoPayload = (state: any): SiigoPayload => {
     console.log('Estado de pagos recibido en buildSiigoPayload:', state.pagos);
     
     const payments = (state.pagos || []).map((pago: any) => {
-      const paymentMethodId = Number(pago.paymentMethodId || pago.cuentaId);
+      // Obtener el ID del método de pago, puede ser string o número
+      const rawPaymentMethodId = pago.paymentMethodId || pago.cuentaId || pago.id;
       const paymentValue = Number(pago.value || pago.monto || 0);
+      
+      // Intentar convertir a número si es posible, de lo contrario mantener como string
+      let paymentMethodId: string | number = rawPaymentMethodId;
+      if (rawPaymentMethodId !== undefined && rawPaymentMethodId !== null) {
+        const numId = Number(rawPaymentMethodId);
+        paymentMethodId = isNaN(numId) ? rawPaymentMethodId : numId;
+      }
       
       console.log('Procesando pago:', {
         pago,
         paymentMethodId,
         paymentValue,
-        isValid: !isNaN(paymentMethodId) && paymentValue > 0
+        isValid: paymentMethodId !== undefined && paymentMethodId !== null && paymentValue > 0
       });
       
-      if (isNaN(paymentMethodId) || paymentValue <= 0) {
+      if ((paymentMethodId === undefined || paymentMethodId === null) || paymentValue <= 0) {
         console.warn('Pago inválido, será omitido:', pago);
         return null;
       }

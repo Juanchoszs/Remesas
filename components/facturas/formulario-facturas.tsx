@@ -403,11 +403,33 @@ export function FormularioFacturas() {
   const [_paymentOptions, _setPaymentOptions] = useState<unknown[]>([]); // usar tipo concreto si se conoce
   const [fvDocs, setFvDocs] = useState<SiigoSaleDocumentResponse[]>([]);
   const [loadingFv, setLoadingFv] = useState(false);
-  const [pagos, setPagos] = useState<Array<{ id: string; value: number; metodo: string; paymentMethodId: number }>>([]);
-// El estado de carga no se utiliza actualmente, pero se guarda para uso futuro.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // El estado de carga no se utiliza actualmente, pero se guarda para uso futuro.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_, setIsLoading] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Manejador para actualizar pagos a través del reducer
+  const handlePagosChange = useCallback((nuevosPagos: any[]) => {
+    // Primero eliminamos todos los pagos existentes
+    state.pagos.forEach(pago => {
+      dispatch({ type: 'REMOVE_PAGO', payload: pago.id });
+    });
+    
+    // Luego agregamos los nuevos pagos
+    nuevosPagos.forEach(pago => {
+      dispatch({
+        type: 'ADD_PAGO',
+        payload: {
+          id: pago.id,
+          tipo: pago.tipo || 'cuenta',
+          cuentaId: pago.cuentaId || pago.paymentMethodId.toString(),
+          monto: pago.monto || pago.value,
+          nombre: pago.nombre || pago.metodo,
+          saldoDisponible: pago.saldoDisponible || 0
+        }
+      });
+    });
+  }, [state.pagos]);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submitResult, setSubmitResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Cargar tipos de documento RC y medios de pago
@@ -624,34 +646,59 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
     if (state.invoiceType === 'purchase') {
       // Lógica para factura de compra
       const codigoProveedor = state.provider?.codigo || state.provider?.identificacion || '';
-      const _branchOffice = state.provider?.branch_office ?? 0; // Prefixed with _ to indicate intentionally unused
+      const _branchOffice = state.provider?.branch_office ?? 0;
 
-    // Mapear los ítems al formato de Siigo
-    const items = state.items.map((item: InvoiceItem) => {
-      const _itemSubtotal = (item.quantity || 0) * (item.price || 0); // Prefixed with _ to indicate intentionally unused
-      const discount = item.discount?.value || 0;
-      
-      return {
-        type: mapItemTypeToSiigoType(item.type), // Esto devuelve 'Product', 'Service' o 'FixedAsset'
-        code: item.code,
-        description: item.description || item.code,
-        quantity: Number(item.quantity) || 1,
-        price: Number(item.price) || 0,
-        discount: discount,
-        taxes: item.hasIVA ? [{
-          id: 18384 // ID del impuesto IVA configurado en Siigo
-        }] : []
-      };
-    });
+      // Mapear los ítems al formato de Siigo
+      const items = state.items.map((item: InvoiceItem) => {
+        const _itemSubtotal = (item.quantity || 0) * (item.price || 0);
+        const discount = item.discount?.value || 0;
+        
+        return {
+          type: mapItemTypeToSiigoType(item.type),
+          code: item.code,
+          description: item.description || item.code,
+          quantity: Number(item.quantity) || 1,
+          price: Number(item.price) || 0,
+          discount: discount,
+          taxes: item.hasIVA ? [{
+            id: 18384 // ID del impuesto IVA configurado en Siigo
+          }] : []
+        };
+      });
 
-    const _total = calculateTotal(state.items, state.ivaPercentage);
+      const totalFactura = calculateTotal(state.items, state.ivaPercentage);
 
-    // No crear pagos automáticamente para evitar la creación de recibos de pago no deseados
-    const payments: Array<{
-      id: number;
-      value: number;
-      due_date?: string;
-    }> = [];
+      // Procesar los pagos del estado
+      console.log('[FormularioFacturas] Procesando pagos del estado:', state.pagos);
+      const payments: Array<{ id: number; value: number; due_date: string; name?: string }> = (state.pagos || []).map((pago, index) => {
+        // Extraer el paymentMethodId del pago
+        const paymentMethodId = (pago as any).paymentMethodId || (pago as any).id;
+        if (!paymentMethodId) {
+          console.error(`[FormularioFacturas] Error: Pago ${index + 1} no tiene un paymentMethodId válido`, pago);
+          throw new Error(`El método de pago ${index + 1} no tiene un ID válido`);
+        }
+        
+        const paymentValue = Number((pago as any).value || (pago as any).monto || 0);
+        const paymentData = {
+          id: Number(paymentMethodId),  // Asegurar que sea un número
+          value: paymentValue,
+          due_date: (pago as any).dueDate || fechaFormateada,
+          name: String((pago as any).nombre || (pago as any).metodo || 'Pago sin nombre')
+        };
+        
+        console.log(`[FormularioFacturas] Pago ${index + 1} procesado:`, paymentData);
+        return paymentData;
+      });
+      console.log('[FormularioFacturas] Pagos procesados para Siigo:', payments);
+
+      // Si no hay pagos, agregar uno por defecto con el total de la factura
+      if (payments.length === 0) {
+        payments.push({
+          id: 1, // ID de método de pago por defecto (efectivo)
+          value: totalFactura,
+          due_date: fechaFormateada
+        });
+      }
 
       // Payload para factura de compra
       return {
@@ -781,43 +828,185 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
     }
   }, [state]);
 
-  const handleSubmit = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = useCallback(async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
+    console.log('[handleSubmit] Iniciando envío del formulario...');
     e.preventDefault();
+    console.log('[handleSubmit] Prevent default ejecutado');
     setIsSubmitting(true);
     setSubmitResult(null);
+    console.log('[handleSubmit] Estado actualizado: isSubmitting = true');
+    
     try {
+      console.log('[handleSubmit] Validando formulario...');
       // Validar formulario
       const validationErrors = validateForm();
+      console.log('[handleSubmit] Errores de validación:', validationErrors);
+      
+      // Validar que haya al menos un pago
+      console.log('[handleSubmit] Validando pagos. Número de pagos:', state.pagos.length);
+      if (state.pagos.length === 0) {
+        console.warn('[handleSubmit] No hay pagos definidos');
+        validationErrors.push('Debe agregar al menos un método de pago');
+      }
+      
       if (validationErrors.length > 0) {
         toast.error('Errores en el formulario', {
-          description: validationErrors.join(', ')
+          description: validationErrors.join('\n')
         });
         setIsSubmitting(false);
         return;
       }
-      // Construir el payload robusto para SIIGO
+      
+      // Construir el payload para Siigo
+      console.log('[FormularioFacturas] Construyendo payload para Siigo...');
       const payload = buildSiigoPayload();
+      console.log('[FormularioFacturas] Payload completo para Siigo:', JSON.stringify(payload, null, 2));
+      
+      // Validar que el total de pagos coincida con el total de la factura
+      if (state.invoiceType === 'purchase') {
+        const totalFactura = calculateTotal(state.items, state.ivaPercentage);
+        const totalPagos = (state.pagos || []).reduce((sum: number, pago: any) => {
+          return sum + Number(pago.value || pago.monto || 0);
+        }, 0);
+        
+        if (Math.abs(totalPagos - totalFactura) > 1) { // Permitir pequeñas diferencias por redondeo
+          toast.error('Error de validación', {
+            description: `El total de pagos (${totalPagos.toFixed(2)}) no coincide con el total de la factura (${totalFactura.toFixed(2)})`
+          });
+          setIsSubmitting(false);
+          return;
+        }
+      }
+      
       const endpoint = state.invoiceType === 'purchase'
         ? '/api/siigo/invoices/fc'
         : (state.saleDocumentType === 'RC' ? '/api/siigo/vouchers' : '/api/siigo/ventas');
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        const siigoMsg = data?.details?.Message || data?.error || data?.message || 'Error desconocido';
-        const missingFields = data?.missingFields ? `\nCampos faltantes: ${data.missingFields.join(', ')}` : '';
-        toast.error('❌ Error al enviar la factura a Siigo', { description: siigoMsg + missingFields, duration: 8000 });
-        setSubmitResult({ success: false, message: siigoMsg + missingFields });
-        throw new Error(siigoMsg + missingFields);
+      
+      console.log('[handleSubmit] Endpoint seleccionado:', endpoint);
+        
+      // Crear un objeto de log con la información relevante
+      const logInfo = {
+        endpoint,
+        payload: {
+          // Incluir solo las propiedades necesarias para el log
+          ...(payload.document && { document: payload.document }),
+          date: payload.date,
+          ...(payload.supplier && { supplier: payload.supplier }),
+          ...(payload.customer && { customer: payload.customer }),
+          items: `[${Array.isArray(payload.items) ? payload.items.length : 0} items]`,
+          payments: `[${Array.isArray(payload.payments) ? payload.payments.length : 0} pagos]`,
+          total: payload.total,
+          ...(payload.observations && { observations: payload.observations })
+        }
+      };
+      
+      console.log('[handleSubmit] Enviando factura a Siigo:', logInfo);
+      console.log('[handleSubmit] Payload completo:', JSON.stringify(payload, null, 2));
+      
+      let response;
+      let responseText;
+      let data;
+      
+      try {
+        console.log(`[handleSubmit] Iniciando petición a: ${endpoint}`);
+        const startTime = Date.now();
+        
+        response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        
+        const responseTime = Date.now() - startTime;
+        console.log(`[handleSubmit] Respuesta recibida en ${responseTime}ms - Status:`, response.status);
+        
+        responseText = await response.text();
+        console.log('[handleSubmit] Respuesta cruda de Siigo:', responseText);
+        
+        try {
+          data = responseText ? JSON.parse(responseText) : {};
+          console.log('[handleSubmit] Respuesta parseada de Siigo:', data);
+        } catch (e) {
+          console.error('[handleSubmit] Error al parsear la respuesta JSON:', e);
+          data = { rawResponse: responseText };
+        }
+        
+        if (!response.ok) {
+          const siigoMsg = data?.details?.Message || data?.error?.message || data?.message || 'Error desconocido';
+          const errorDetails = data?.details || data?.error || {};
+          const missingFields = data?.missingFields ? `\nCampos faltantes: ${data.missingFields.join(', ')}` : '';
+          const errorMessage = `[${response.status} ${response.statusText}] ${siigoMsg}${missingFields}`;
+          
+          console.error('[handleSubmit] Error en la respuesta de Siigo:', {
+            status: response.status,
+            statusText: response.statusText,
+            error: errorDetails,
+            response: data,
+            request: {
+              url: endpoint,
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: payload
+            }
+          });
+          
+          toast.error('❌ Error al enviar la factura a Siigo', { 
+            description: errorMessage, 
+            duration: 10000 
+          });
+          
+          setSubmitResult({ 
+            success: false, 
+            message: `Error ${response.status}: ${errorMessage}` 
+          });
+          
+          throw new Error(errorMessage);
+        }
+        
+        // Si llegamos aquí, la solicitud fue exitosa
+        const invoiceNumber = data.number || data.data?.number || state.providerInvoiceNumber;
+        console.log('[handleSubmit] Factura creada exitosamente:', { 
+          invoiceNumber,
+          response: data 
+        });
+        
+        toast.success('✅ Factura enviada correctamente a Siigo', {
+          description: `Número de factura: ${invoiceNumber}`,
+          duration: 10000,
+        });
+        
+        setSubmitResult({ 
+          success: true, 
+          message: `Factura ${invoiceNumber} enviada correctamente` 
+        });
+        
+        // Resetear el formulario después de un envío exitoso
+        dispatch({ type: 'RESET_FORM' });
+        router.refresh();
+        
+        return data;
+      } catch (error) {
+        let errorMessage = 'Error desconocido al enviar la factura';
+        if (error instanceof Error) {
+          errorMessage = error.message;
+        } else if (typeof error === 'string') {
+          errorMessage = error;
+        }
+        toast.error('❌ Error al enviar la factura', {
+          description: errorMessage,
+          duration: 6000,
+        });
+        setSubmitResult({ success: false, message: errorMessage });
+        throw error; // Re-lanzar el error para que se maneje en el catch externo si es necesario
+      } finally {
       }
-      toast.success('✅ Factura enviada correctamente a Siigo', {
-        description: `Número de factura: ${data.number || data.data?.number || state.providerInvoiceNumber}`,
-        duration: 5000,
+
+      const invoiceNumber = data.number || data.data?.number || state.providerInvoiceNumber;
+      toast.success('Factura enviada correctamente a Siigo', {
+        description: `Número de factura: ${invoiceNumber}`,
+        duration: 10000,
       });
-      setSubmitResult({ success: true, message: `Factura enviada correctamente. Número: ${data.number || data.data?.number || state.providerInvoiceNumber}` });
+      setSubmitResult({ success: true, message: `Factura ${invoiceNumber} enviada correctamente` });
       dispatch({ type: 'RESET_FORM' });
       router.refresh();
     } catch (error) {
@@ -827,7 +1016,7 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
       } else if (typeof error === 'string') {
         errorMessage = error;
       }
-      toast.error('❌ Error al enviar la factura', {
+      toast.error('Error al enviar la factura', {
         description: errorMessage,
         duration: 6000,
       });
@@ -835,12 +1024,12 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
     } finally {
       setIsSubmitting(false);
     }
-  }, [state, validateForm, buildSiigoPayload, router]);
+  }, [state, validateForm, buildSiigoPayload, router, setIsSubmitting, setSubmitResult, toast, calculateTotal]);
 
-  const handleInvoiceTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleInvoiceTypeChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     const invoiceType = e.target.value as InvoiceType;
     dispatch({ type: 'SET_INVOICE_TYPE', payload: invoiceType });
-  };
+  }, []);
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
@@ -1323,7 +1512,7 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
           </CardHeader>
           <CardContent>
             <FormaPagoSelector
-              onPagosChange={setPagos}
+              onPagosChange={handlePagosChange}
               total={calculateTotal(state.items, state.ivaPercentage)}
               documentType={state.invoiceType === 'purchase' ? 'FC' : state.saleDocumentType || 'FV'}
             />

@@ -55,12 +55,52 @@ export async function POST(request: NextRequest) {
         ...( (body as any).provider_invoice.number !== undefined ? { number: String((body as any).provider_invoice.number) } : {} ),
       } : undefined;
 
-      // Usar directamente el objeto de pago que viene del frontend
-      // que ya contiene la información correcta de la API de Siigo
-      if (body.payments && Array.isArray(body.payments) && body.payments.length > 0) {
-        console.log('Método de pago recibido del frontend:', body.payments[0]);
+      // Procesar los pagos recibidos del frontend
+      console.log('=== INICIO DE PROCESAMIENTO DE PAGOS EN LA API ===');
+      console.log('Body completo recibido:', JSON.stringify(body, null, 2));
+      
+      let payments = [];
+      if (body.payments && Array.isArray(body.payments)) {
+        console.log(`Se recibieron ${body.payments.length} pagos del frontend`);
+        
+        // Mapear los pagos al formato que espera Siigo
+        payments = body.payments.map((pago: any, index: number) => {
+          console.log(`Procesando pago ${index + 1}:`, JSON.stringify(pago, null, 2));
+          
+          const pagoProcesado = {
+            id: Number(pago.id),
+            value: Number(pago.value || 0),
+            due_date: pago.due_date || new Date().toISOString().split('T')[0],
+            ...(pago.name && { name: String(pago.name) })
+          };
+          
+          console.log(`Pago ${index + 1} procesado:`, JSON.stringify(pagoProcesado, null, 2));
+          return pagoProcesado;
+        });
+        
+        console.log('=== RESUMEN DE PAGOS PROCESADOS ===');
+        console.log(JSON.stringify(payments, null, 2));
+        
+        // Validar que los pagos tengan un ID válido
+        const invalidPayments = payments.filter((p: any) => !p.id || isNaN(Number(p.id)));
+        if (invalidPayments.length > 0) {
+          console.error('=== ERROR: PAGOS CON ID INVÁLIDO ===');
+          console.error(JSON.stringify(invalidPayments, null, 2));
+          throw new Error('Uno o más pagos tienen un ID de método de pago inválido');
+        }
+        
+        // Validar que la suma de los pagos coincida con el total de la factura
+        if (body.total) {
+          const totalPagos = payments.reduce((sum: number, p: any) => sum + Number(p.value || 0), 0);
+          console.log(`Total de la factura: ${body.total}, Total de pagos: ${totalPagos}`);
+          
+          if (Math.abs(totalPagos - Number(body.total)) > 1) {
+            console.error('=== ERROR: DESCUADRE EN TOTAL DE PAGOS ===');
+            console.error(`El total de pagos (${totalPagos}) no coincide con el total de la factura (${body.total})`);
+          }
+        }
       } else {
-        console.warn('No se recibió información de pago en la solicitud');
+        console.warn('No se recibió información de pago en la solicitud. Se creará sin pagos.');
       }
 
       const items = Array.isArray((body as any)?.items)
@@ -105,15 +145,8 @@ export async function POST(request: NextRequest) {
         ...( typeof (body as any)?.supplier_by_item === 'boolean' ? { supplier_by_item: (body as any).supplier_by_item } : { supplier_by_item: false } ),
         ...( typeof (body as any)?.tax_included === 'boolean' ? { tax_included: (body as any).tax_included } : { tax_included: false } ),
         items,
-        // Usar los pagos que vienen del body (ya procesados por buildSiigoPayload)
-        payments: body.payments && Array.isArray(body.payments) && body.payments.length > 0
-          ? [{
-              id: Number(body.payments[0].id),
-              name: String(body.payments[0].name || 'Pago'),
-              value: Number(body.payments[0].value || 0),
-              due_date: body.payments[0].due_date || new Date().toISOString().split('T')[0]
-            }]
-          : []
+        // Usar los pagos ya procesados
+        payments: payments
       };
 
       console.log('Payload a enviar a Siigo:', JSON.stringify(payload, null, 2));

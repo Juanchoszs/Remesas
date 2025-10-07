@@ -15,8 +15,27 @@ export interface PaymentMethod {
   due_date: boolean;
 }
 
+interface PagoType {
+  id: string;
+  value: number;
+  metodo: string;
+  paymentMethod?: {
+    id: number | string;
+    name?: string;
+    type?: string;
+    due_date?: boolean;
+  };
+  paymentMethodId?: number | string;
+  tipo: 'cuenta' | 'anticipo';
+  cuentaId: string;
+  nombre: string;
+  monto: number;
+  saldoDisponible?: number;
+  dueDate?: string;
+}
+
 interface FormaPagoSelectorProps {
-  onPagosChange: (pagos: Array<{ id: string; value: number; metodo: string; paymentMethodId: number }>) => void;
+  onPagosChange: (pagos: PagoType[]) => void;
   onPaymentMethodChange?: (method: PaymentMethod | null) => void;
   selectedPaymentMethod?: PaymentMethod | null;
   total: number;
@@ -33,7 +52,7 @@ export function FormaPagoSelector({
   documentType = 'FV' 
 }: FormaPagoSelectorProps) {
   const [metodosPago, setMetodosPago] = useState<PaymentMethod[]>([]);
-  const [pagos, setPagos] = useState<Array<{ id: string; value: number; metodo: string; paymentMethodId: number }>>([]);
+  const [pagos, setPagos] = useState<PagoType[]>([]);
   const [metodoPagoId, setMetodoPagoId] = useState<string>(selectedPaymentMethod?.id?.toString() || '');
   const [monto, setMonto] = useState<string>('');
   const [cargando, setCargando] = useState(true);
@@ -100,11 +119,14 @@ export function FormaPagoSelector({
   }, [toast]);
 
   const handleAddPago = () => {
+    console.log('[FormaPagoSelector] Agregando pago, monto actual:', monto);
     const montoNum = parseFloat(monto);
     if (!monto || isNaN(montoNum) || montoNum <= 0) {
+      const errorMsg = 'Ingrese un monto válido';
+      console.error('[FormaPagoSelector] Error:', errorMsg);
       toast({
         title: 'Error',
-        description: 'Ingrese un monto válido',
+        description: errorMsg,
         variant: 'destructive',
       });
       return;
@@ -120,20 +142,47 @@ export function FormaPagoSelector({
       return;
     }
 
-    // Crear un nuevo pago con toda la información necesaria
-    const nuevoPago = {
-      id: `pago-${Date.now()}`,
-      value: montoNum,
-      metodo: metodoSeleccionado.name,
-      paymentMethodId: metodoSeleccionado.id,
-      tipo: 'cuenta',
-      cuentaId: metodoSeleccionado.id.toString(),
-      nombre: metodoSeleccionado.name,
-      monto: montoNum
-    };
+    // Verificar si ya existe un pago con el mismo método
+    const pagoExistenteIndex = pagos.findIndex(p => p.paymentMethod?.id === metodoSeleccionado.id);
+    let nuevosPagos;
+
+    if (pagoExistenteIndex >= 0) {
+      // Actualizar pago existente
+      nuevosPagos = [...pagos];
+      const pagoExistente = { ...nuevosPagos[pagoExistenteIndex] };
+      nuevosPagos[pagoExistenteIndex] = {
+        ...pagoExistente,
+        value: montoNum,
+        monto: montoNum,
+        paymentMethod: {
+          id: metodoSeleccionado.id,
+          name: metodoSeleccionado.name,
+          type: metodoSeleccionado.type,
+          due_date: metodoSeleccionado.due_date
+        }
+      };
+    } else {
+      // Crear un nuevo pago con el objeto completo del método de pago
+      const nuevoPago: PagoType = {
+        id: `pago-${Date.now()}`,
+        value: montoNum,
+        metodo: metodoSeleccionado.name,
+        paymentMethod: {
+          id: metodoSeleccionado.id,
+          name: metodoSeleccionado.name,
+          type: metodoSeleccionado.type,
+          due_date: metodoSeleccionado.due_date
+        },
+        tipo: 'cuenta',
+        cuentaId: metodoSeleccionado.id.toString(),
+        nombre: metodoSeleccionado.name,
+        monto: montoNum,
+        saldoDisponible: 0
+      };
+      nuevosPagos = [...pagos, nuevoPago];
+    }
     
     // Actualizar el estado local
-    const nuevosPagos = [...pagos, nuevoPago];
     setPagos(nuevosPagos);
     
     // Notificar al componente padre sobre los cambios en los pagos
@@ -142,15 +191,12 @@ export function FormaPagoSelector({
     // Limpiar el campo de monto después de agregar
     setMonto('');
     
-    // Notificar al componente padre sobre el método de pago seleccionado
-    if (onPaymentMethodChange) {
-      onPaymentMethodChange(metodoSeleccionado);
-    }
-    
     // Mostrar mensaje de éxito
     toast({
-      title: 'Pago agregado',
-      description: `Se ha agregado un pago de $${montoNum.toFixed(2)} con ${metodoSeleccionado.name}`,
+      title: pagoExistenteIndex >= 0 ? 'Pago actualizado' : 'Pago agregado',
+      description: pagoExistenteIndex >= 0 
+        ? `Se ha actualizado el pago a $${montoNum.toFixed(2)} con ${metodoSeleccionado.name}`
+        : `Se ha agregado un pago de $${montoNum.toFixed(2)} con ${metodoSeleccionado.name}`,
       variant: 'default',
     });
   };
@@ -172,9 +218,22 @@ export function FormaPagoSelector({
       }
     } else if (pagoAEliminar && onPaymentMethodChange) {
       // Si se eliminó un pago, notificar sobre el nuevo método de pago activo (si hay alguno)
-      const metodoActual = metodosPago.find(m => m.id === nuevosPagos[0].paymentMethodId);
-      if (metodoActual) {
-        onPaymentMethodChange(metodoActual);
+      const primerPago = nuevosPagos[0];
+      if (primerPago) {
+        // Safely get payment method ID from any possible location
+        const paymentMethodId = (
+          (primerPago.paymentMethod?.id && Number(primerPago.paymentMethod.id)) ||
+          (primerPago.paymentMethodId && Number(primerPago.paymentMethodId)) ||
+          (primerPago.cuentaId && Number(primerPago.cuentaId)) ||
+          null
+        );
+        
+        if (paymentMethodId && !isNaN(paymentMethodId)) {
+          const metodoActual = metodosPago.find(m => m.id === paymentMethodId);
+          if (metodoActual && onPaymentMethodChange) {
+            onPaymentMethodChange(metodoActual);
+          }
+        }
       }
     }
     
@@ -188,41 +247,9 @@ export function FormaPagoSelector({
     }
   };
 
-  // Actualizar pagos cuando cambia el método de pago o el monto
+  // Actualizar solo el método de pago seleccionado cuando cambia
   useEffect(() => {
-    // Solo actualizar si hay un método de pago seleccionado y un monto válido
-    if (metodoPagoId && monto) {
-      const montoNum = parseFloat(monto);
-      if (isNaN(montoNum) || montoNum <= 0) {
-        return;
-      }
-      
-      const metodoSeleccionado = metodosPago.find(m => m.id.toString() === metodoPagoId);
-      if (metodoSeleccionado) {
-        const nuevoPago = {
-          id: `pago-${Date.now()}`,
-          value: montoNum,
-          metodo: metodoSeleccionado.name,
-          paymentMethodId: metodoSeleccionado.id,
-          tipo: 'cuenta',
-          cuentaId: metodoSeleccionado.id.toString(),
-          nombre: metodoSeleccionado.name,
-          monto: montoNum
-        };
-        
-        // Actualizar el estado local
-        setPagos([nuevoPago]);
-        
-        // Notificar al componente padre sobre los cambios en los pagos
-        onPagosChange([nuevoPago]);
-        
-        // Notificar al componente padre sobre el método de pago seleccionado
-        if (onPaymentMethodChange) {
-          onPaymentMethodChange(metodoSeleccionado);
-        }
-      }
-    } else if (metodoPagoId) {
-      // Solo se actualizó el método de pago
+    if (metodoPagoId) {
       const metodoSeleccionado = metodosPago.find(m => m.id.toString() === metodoPagoId);
       if (metodoSeleccionado && onPaymentMethodChange) {
         onPaymentMethodChange(metodoSeleccionado);
@@ -230,45 +257,14 @@ export function FormaPagoSelector({
     } else if (onPaymentMethodChange) {
       onPaymentMethodChange(null);
     }
-  }, [metodoPagoId, monto, metodosPago, onPagosChange, onPaymentMethodChange]);
+  }, [metodoPagoId, metodosPago, onPaymentMethodChange]);
   
   // Sincronizar con el método de pago seleccionado desde el padre
   useEffect(() => {
     if (selectedPaymentMethod && selectedPaymentMethod.id.toString() !== metodoPagoId) {
       setMetodoPagoId(selectedPaymentMethod.id.toString());
-      
-      // Si hay un monto, actualizar el pago
-      if (monto) {
-        const montoNum = parseFloat(monto);
-        if (!isNaN(montoNum) && montoNum > 0) {
-          const nuevoPago = {
-            id: `pago-${Date.now()}`,
-            value: montoNum,
-            metodo: selectedPaymentMethod.name,
-            paymentMethodId: selectedPaymentMethod.id,
-            tipo: 'cuenta',
-            cuentaId: selectedPaymentMethod.id.toString(),
-            nombre: selectedPaymentMethod.name,
-            monto: montoNum
-          };
-          
-          // Actualizar el estado local
-          const nuevosPagos = [nuevoPago];
-          setPagos(nuevosPagos);
-          
-          // Notificar al componente padre sobre los cambios en los pagos
-          onPagosChange(nuevosPagos);
-          
-          // Mostrar mensaje
-          toast({
-            title: 'Método de pago actualizado',
-            description: `Se ha actualizado el método de pago a ${selectedPaymentMethod.name}`,
-            variant: 'default',
-          });
-        }
-      }
     }
-  }, [selectedPaymentMethod, metodoPagoId, monto, onPagosChange, toast]);
+  }, [selectedPaymentMethod, metodoPagoId]);
 
   const totalPagado = pagos.reduce((sum, pago) => sum + pago.value, 0);
   const saldoPendiente = total - totalPagado;
