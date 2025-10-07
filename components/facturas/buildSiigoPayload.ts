@@ -85,35 +85,49 @@ export const buildSiigoPayload = (state: any): SiigoPayload => {
     // Configurar pagos según documentación de Siigo
     console.log('Estado de pagos recibido en buildSiigoPayload:', state.pagos);
     
-    const payments = (state.pagos || []).map((pago: any) => {
-      // Obtener el ID del método de pago, puede ser string o número
-      const rawPaymentMethodId = pago.paymentMethodId || pago.cuentaId || pago.id;
+    console.log('Procesando pagos del estado:', state.pagos);
+    const payments = (state.pagos || []).map((pago: any, index: number) => {
+      // Extraer el paymentMethod del pago
+      const paymentMethod = pago.paymentMethod;
+      
+      // Si no hay paymentMethod, intentar obtener el ID de otras propiedades
+      let paymentMethodId = paymentMethod?.id || pago.paymentMethodId || pago.cuentaId || pago.id;
       const paymentValue = Number(pago.value || pago.monto || 0);
       
-      // Intentar convertir a número si es posible, de lo contrario mantener como string
-      let paymentMethodId: string | number = rawPaymentMethodId;
-      if (rawPaymentMethodId !== undefined && rawPaymentMethodId !== null) {
-        const numId = Number(rawPaymentMethodId);
-        paymentMethodId = isNaN(numId) ? rawPaymentMethodId : numId;
+      // Validar que tengamos un ID de método de pago válido
+      if (!paymentMethodId) {
+        console.error(`[buildSiigoPayload] Error: Pago ${index + 1} no tiene un ID de método de pago válido`, pago);
+        throw new Error(`El método de pago ${index + 1} no tiene un ID válido`);
       }
       
-      console.log('Procesando pago:', {
-        pago,
+      // Convertir el ID a número si es posible
+      if (typeof paymentMethodId === 'string') {
+        const numId = Number(paymentMethodId);
+        paymentMethodId = isNaN(numId) ? paymentMethodId : numId;
+      }
+      
+      console.log(`[buildSiigoPayload] Pago ${index + 1} procesado:`, {
         paymentMethodId,
         paymentValue,
-        isValid: paymentMethodId !== undefined && paymentMethodId !== null && paymentValue > 0
+        due_date: fechaFormateada,
+        name: paymentMethod?.name || pago.nombre || `Pago ${index + 1}`
       });
       
-      if ((paymentMethodId === undefined || paymentMethodId === null) || paymentValue <= 0) {
-        console.warn('Pago inválido, será omitido:', pago);
-        return null;
-      }
-      
-      return {
+      // Crear el objeto de pago para Siigo
+      const paymentData: any = {
         id: paymentMethodId,
         value: paymentValue,
-        due_date: fechaFormateada
+        due_date: pago.dueDate || fechaFormateada
       };
+      
+      // Agregar el nombre del método de pago si está disponible
+      if (paymentMethod?.name) {
+        paymentData.name = paymentMethod.name;
+      } else if (pago.nombre) {
+        paymentData.name = pago.nombre;
+      }
+      
+      return paymentData;
     }).filter(Boolean); // Filtrar valores nulos
 
     console.log('Pagos procesados para Siigo:', payments);

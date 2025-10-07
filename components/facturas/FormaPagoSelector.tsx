@@ -134,6 +134,7 @@ export function FormaPagoSelector({
 
     const metodoSeleccionado = metodosPago.find(m => m.id.toString() === metodoPagoId);
     if (!metodoSeleccionado) {
+      console.error('[FormaPagoSelector] No se encontró el método de pago seleccionado');
       toast({
         title: 'Error',
         description: 'Seleccione un método de pago válido',
@@ -142,27 +143,33 @@ export function FormaPagoSelector({
       return;
     }
 
-    // Verificar si ya existe un pago con el mismo método
-    const pagoExistenteIndex = pagos.findIndex(p => p.paymentMethod?.id === metodoSeleccionado.id);
-    let nuevosPagos;
+    // Buscar si ya existe un pago con este método
+    const pagoExistenteIndex = pagos.findIndex(p => {
+      const pagoMethodId = p.paymentMethod?.id || p.paymentMethodId || p.cuentaId;
+      return pagoMethodId && pagoMethodId.toString() === metodoSeleccionado.id.toString();
+    });
+
+    let nuevosPagos: PagoType[] = [];
 
     if (pagoExistenteIndex >= 0) {
       // Actualizar pago existente
       nuevosPagos = [...pagos];
-      const pagoExistente = { ...nuevosPagos[pagoExistenteIndex] };
       nuevosPagos[pagoExistenteIndex] = {
-        ...pagoExistente,
-        value: montoNum,
+        ...nuevosPagos[pagoExistenteIndex],
         monto: montoNum,
+        value: montoNum,
+        nombre: metodoSeleccionado.name,
+        // Asegurarse de que el paymentMethod esté completo
         paymentMethod: {
           id: metodoSeleccionado.id,
           name: metodoSeleccionado.name,
           type: metodoSeleccionado.type,
           due_date: metodoSeleccionado.due_date
-        }
+        },
+        paymentMethodId: metodoSeleccionado.id // Mantener compatibilidad
       };
     } else {
-      // Crear un nuevo pago con el objeto completo del método de pago
+      // Si no existe, agregar uno nuevo
       const nuevoPago: PagoType = {
         id: `pago-${Date.now()}`,
         value: montoNum,
@@ -173,15 +180,18 @@ export function FormaPagoSelector({
           type: metodoSeleccionado.type,
           due_date: metodoSeleccionado.due_date
         },
+        paymentMethodId: metodoSeleccionado.id, // Para compatibilidad
         tipo: 'cuenta',
         cuentaId: metodoSeleccionado.id.toString(),
         nombre: metodoSeleccionado.name,
         monto: montoNum,
-        saldoDisponible: 0
+        saldoDisponible: 0,
+        dueDate: new Date().toISOString().split('T')[0] // Fecha de vencimiento por defecto
       };
+      console.log('[FormaPagoSelector] Nuevo pago creado:', nuevoPago);
       nuevosPagos = [...pagos, nuevoPago];
     }
-    
+
     // Actualizar el estado local
     setPagos(nuevosPagos);
     

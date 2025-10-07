@@ -670,20 +670,33 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
 
       // Procesar los pagos del estado
       console.log('[FormularioFacturas] Procesando pagos del estado:', state.pagos);
-      const payments: Array<{ id: number; value: number; due_date: string; name?: string }> = (state.pagos || []).map((pago, index) => {
-        // Extraer el paymentMethodId del pago
-        const paymentMethodId = (pago as any).paymentMethodId || (pago as any).id;
+      const payments: Array<{ id: number; value: number; due_date: string; name?: string }> = (state.pagos || []).map((pago: any, index) => {
+        console.log('[FormularioFacturas] Pago objeto completo:', pago);
+        
+        // Extraer el ID del método de pago desde cuentaId
+        const paymentMethodId = pago.cuentaId;
+        
         if (!paymentMethodId) {
-          console.error(`[FormularioFacturas] Error: Pago ${index + 1} no tiene un paymentMethodId válido`, pago);
+          console.error(`[FormularioFacturas] Error: Pago ${index + 1} no tiene un ID de método de pago válido`, pago);
           throw new Error(`El método de pago ${index + 1} no tiene un ID válido`);
         }
+
+        // Asegurarse de que el ID sea un número válido
+        const numericId = Number(paymentMethodId);
+        if (isNaN(numericId)) {
+          console.error(`[FormularioFacturas] Error: El ID del método de pago no es un número válido`, {
+            originalId: paymentMethodId,
+            pagoObject: pago
+          });
+          throw new Error(`El ID del método de pago no es un número válido: ${paymentMethodId}`);
+        }
         
-        const paymentValue = Number((pago as any).value || (pago as any).monto || 0);
+        const paymentValue = Number(pago.value || pago.monto || 0);
         const paymentData = {
-          id: Number(paymentMethodId),  // Asegurar que sea un número
+          id: numericId,
           value: paymentValue,
-          due_date: (pago as any).dueDate || fechaFormateada,
-          name: String((pago as any).nombre || (pago as any).metodo || 'Pago sin nombre')
+          due_date: pago.dueDate || pago.due_date || fechaFormateada,
+          name: String(pago.nombre || pago.metodo || pago.paymentMethod?.name || 'Pago sin nombre')
         };
         
         console.log(`[FormularioFacturas] Pago ${index + 1} procesado:`, paymentData);

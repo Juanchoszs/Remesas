@@ -244,7 +244,7 @@ export async function POST(request: NextRequest) {
                       'Accept': 'application/json'
                     }
                   });
-                  const listText = await listResp.text();
+                  const listText = await listResp.text();   
                   const listData = listText ? JSON.parse(listText) : [];
                   const docs = Array.isArray(listData) ? listData : (Array.isArray(listData?.results) ? listData.results : []);
                   const currentDocId = Number(payload?.document?.id);
