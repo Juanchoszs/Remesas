@@ -1478,7 +1478,7 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
                       {fvDocs.map((d: SiigoSaleDocumentResponse, i: number) => {
                         const prefix = d?.prefix || d?.prefijo || 'FV-1';
                         const consecutive = d?.consecutive || d?.numero || d?.number || 0;
-                        const fecha = d?.date || d?.fecha || '';
+                        const fecha = d?.date || d?.fecha || '';9
                         const name = d?.customer?.name || d?.customer?.nombre || '';
                         const saldo = d?.balance ?? d?.saldo ?? '';
                         return (
