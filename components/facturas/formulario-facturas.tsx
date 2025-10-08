@@ -875,19 +875,28 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
       const payload = buildSiigoPayload();
       console.log('[FormularioFacturas] Payload completo para Siigo:', JSON.stringify(payload, null, 2));
       
-      // Validar que el total de pagos coincida con el total de la factura
+      // Validar que haya al menos un pago con monto mayor a cero
       if (state.invoiceType === 'purchase') {
-        const totalFactura = calculateTotal(state.items, state.ivaPercentage);
         const totalPagos = (state.pagos || []).reduce((sum: number, pago: any) => {
           return sum + Number(pago.value || pago.monto || 0);
         }, 0);
         
-        if (Math.abs(totalPagos - totalFactura) > 1) { // Permitir pequeñas diferencias por redondeo
+        if (totalPagos <= 0) {
           toast.error('Error de validación', {
-            description: `El total de pagos (${totalPagos.toFixed(2)}) no coincide con el total de la factura (${totalFactura.toFixed(2)})`
+            description: 'Debe agregar al menos un pago con monto mayor a cero'
           });
           setIsSubmitting(false);
           return;
+        }
+        
+        // Solo mostrar advertencia si la diferencia es significativa (más de 1% del total)
+        const totalFactura = calculateTotal(state.items, state.ivaPercentage);
+        const diferencia = Math.abs(totalPagos - totalFactura);
+        const diferenciaPorcentaje = (diferencia / totalFactura) * 100;
+        
+        if (diferencia > 1 && diferenciaPorcentaje > 1) { // Más de 1 unidad y más del 1% de diferencia
+          console.warn(`[handleSubmit] Advertencia: El total de pagos (${totalPagos.toFixed(2)}) no coincide con el total de la factura (${totalFactura.toFixed(2)})`);
+          // No detenemos el envío, solo mostramos advertencia en consola
         }
       }
       
