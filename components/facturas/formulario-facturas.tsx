@@ -17,6 +17,8 @@ import {
   Plus, 
   Save,
   CreditCard,
+  CheckCircle2 as CheckCircledIcon,
+  AlertTriangle as ExclamationTriangleIcon
 } from 'lucide-react';
 import { FormaPagoSelector } from './FormaPagoSelector';
 
