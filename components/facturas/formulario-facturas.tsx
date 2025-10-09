@@ -15,8 +15,8 @@ import { toast } from "sonner";
 import { 
   Send, 
   Plus, 
-  CheckCircle2 as CheckCircledIcon, 
-  AlertTriangle as ExclamationTriangleIcon 
+  Save,
+  CreditCard,
 } from 'lucide-react';
 import { FormaPagoSelector } from './FormaPagoSelector';
 
@@ -841,9 +841,19 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
     }
   }, [state]);
 
-  const handleSubmit = useCallback(async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
+  const handleSubmit = useCallback(async (e: React.FormEvent<HTMLFormElement> | null, action: 'save' | 'pay' = 'save'): Promise<void> => {
+    // Si se llama desde un evento de formulario, prevenir el comportamiento por defecto
+    if (e) {
+      e.preventDefault();
+    }
+    console.log(`[handleSubmit] Iniciando ${action === 'save' ? 'guardado' : 'pago'} de factura...`);
     console.log('[handleSubmit] Iniciando envío del formulario...');
-    e.preventDefault();
+    
+    // Solo prevenir el comportamiento por defecto si es un evento de formulario
+    if (e && e.preventDefault) {
+      e.preventDefault();
+    }
+    
     console.log('[handleSubmit] Prevent default ejecutado');
     setIsSubmitting(true);
     setSubmitResult(null);
@@ -855,11 +865,26 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
       const validationErrors = validateForm();
       console.log('[handleSubmit] Errores de validación:', validationErrors);
       
-      // Validar que haya al menos un pago
-      console.log('[handleSubmit] Validando pagos. Número de pagos:', state.pagos.length);
-      if (state.pagos.length === 0) {
-        console.warn('[handleSubmit] No hay pagos definidos');
-        validationErrors.push('Debe agregar al menos un método de pago');
+      // Validar pagos según la acción
+      console.log('[handleSubmit] Validando pagos. Acción:', action, 'Número de pagos:', state.pagos.length);
+      
+      if (action === 'pay') {
+        // Para pago, necesitamos al menos un método de pago
+        if (state.pagos.length === 0) {
+          console.warn('[handleSubmit] No hay pagos definidos para pago');
+          validationErrors.push('Debe agregar al menos un método de pago para realizar el pago');
+        } else {
+          // Verificar que el total de pagos coincida con el total de la factura
+          const totalFactura = calculateTotal(state.items, state.ivaPercentage);
+          const totalPagos = state.pagos.reduce((sum, pago) => sum + (Number(pago.monto) || 0), 0);
+          
+          if (Math.abs(totalPagos - totalFactura) > 0.01) {
+            console.warn(`[handleSubmit] El total de pagos (${totalPagos}) no coincide con el total de la factura (${totalFactura})`);
+            // Ajustar automáticamente el primer pago para que coincida con el total
+            state.pagos[0].monto = totalFactura - (totalPagos - (Number(state.pagos[0].monto) || 0));
+            console.log(`[handleSubmit] Ajustado monto del primer pago a: ${state.pagos[0].monto}`);
+          }
+        }
       }
       
       if (validationErrors.length > 0) {
@@ -872,14 +897,60 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
       
       // Construir el payload para Siigo
       console.log('[FormularioFacturas] Construyendo payload para Siigo...');
-      const payload = buildSiigoPayload();
+      let payload = buildSiigoPayload();
+      
+      // Si es solo guardar, mantener la información del pago pero con valor 0
+      if (action === 'save') {
+        console.log('[handleSubmit] Configurando pago a $0 para guardar factura');
+        if (state.pagos && state.pagos.length > 0) {
+          // Usar el primer pago seleccionado pero con monto 0
+          const pagoSeleccionado = state.pagos[0];
+          payload.payments = [{
+            id: Number(pagoSeleccionado.cuentaId),
+            name: pagoSeleccionado.nombre,
+            value: 0,
+            due_date: state.invoiceDate
+          }];
+        } else {
+          // Si no hay pagos seleccionados, usar un valor por defecto
+          payload.payments = [{
+            id: 1, // ID por defecto
+            name: 'Pendiente de pago',
+            value: 0,
+            due_date: state.invoiceDate
+          }];
+        }
+      } else {
+        // Si es pago, asegurarse de que el total de pagos sea igual al total de la factura
+        const totalFactura = calculateTotal(state.items, state.ivaPercentage);
+        
+        if (Array.isArray(payload.payments) && payload.payments.length > 0) {
+          // Ajustar el primer pago para que coincida con el total de la factura
+          const firstPayment = payload.payments[0];
+          if (firstPayment) {
+            firstPayment.value = totalFactura;
+            firstPayment.due_date = state.invoiceDate;
+          }
+        } else {
+          // Si no hay pagos, agregar uno nuevo
+          payload.payments = [{
+            id: 1, // ID de pago por defecto
+            name: 'Pago total',
+            value: totalFactura,
+            due_date: state.invoiceDate
+          }];
+        }
+      }
+      
       console.log('[FormularioFacturas] Payload completo para Siigo:', JSON.stringify(payload, null, 2));
       
       // Validar que haya al menos un pago con monto mayor a cero
-      if (state.invoiceType === 'purchase') {
-        const totalPagos = (state.pagos || []).reduce((sum: number, pago: any) => {
-          return sum + Number(pago.value || pago.monto || 0);
-        }, 0);
+      if (state.invoiceType === 'purchase' && action === 'pay') {
+        const totalPagos = Array.isArray(payload.payments) 
+          ? payload.payments.reduce((sum: number, pago: any) => {
+              return sum + (Number(pago?.value) || 0);
+            }, 0)
+          : 0;
         
         if (totalPagos <= 0) {
           toast.error('Error de validación', {
@@ -1069,7 +1140,7 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
         </Alert>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={(e) => handleSubmit(e, 'save')} className="space-y-6">
         <Card>
           <CardHeader>
             <div className="flex justify-between items-center">
@@ -1541,6 +1612,41 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
           </CardContent>
         </Card>
 
+        {/* Botones */}
+        <div className="flex justify-end gap-4 mt-6">
+          <Button
+            type="button"
+            variant="outline"
+            size="lg"
+            onClick={() => window.history.back()}
+            disabled={isSubmitting}
+          >
+            Cancelar
+          </Button>
+          <div className="flex gap-4">
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              onClick={() => handleSubmit(null, 'save')}
+              disabled={isSubmitting || state.items.length === 0}
+            >
+              <Save className="mr-2 h-4 w-4" />
+              {isSubmitting ? 'Guardando...' : 'Guardar Factura'}
+            </Button>
+            <Button
+              type="button"
+              variant="default"
+              size="lg"
+              onClick={() => handleSubmit(null, 'pay')}
+              disabled={isSubmitting || state.items.length === 0}
+            >
+              <CreditCard className="mr-2 h-4 w-4" />
+              {isSubmitting ? 'Procesando...' : 'Pagar Factura'}
+            </Button>
+          </div>
+        </div>
+
         {/* Resumen de totales */}
         <Card>
           <CardHeader>
@@ -1593,26 +1699,7 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
           </CardContent>
         </Card>
 
-        {/* Botones */}
-        <div className="flex justify-end gap-4">
-          <Button
-            type="button"
-            variant="outline"
-            size="lg"
-            onClick={() => window.history.back()}
-            disabled={isSubmitting}
-          >
-            Cancelar
-          </Button>
-          <Button
-            type="submit"
-            size="lg"
-            disabled={isSubmitting || state.items.length === 0}
-          >
-            <Send className="mr-2 h-4 w-4" />
-            {isSubmitting ? 'Enviando a Siigo...' : state.invoiceType === 'purchase' ? 'Enviar Factura de Compra a Siigo' : (state.saleDocumentType === 'RC' ? 'Enviar RC a Siigo' : 'Enviar Factura de Venta a Siigo')}
-          </Button>
-        </div>
+        
       </form>
     </div>
   );
