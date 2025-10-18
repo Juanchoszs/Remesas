@@ -202,8 +202,13 @@ interface InvoiceState {
   providerInvoiceNumber: string;
   providerInvoicePrefix: string;
   observations: string;
-  ivaPercentage: number;
   providerCode: string;
+  taxesList?: Array<{
+    id: string;
+    name: string;
+    percentage: number;
+    type: string;
+  }>;
   providerIdentification: string;
   costCenter: string;
   cufe?: string;
@@ -236,6 +241,7 @@ interface InvoiceState {
   }>;
   rcPaymentId?: number; // ID de forma de pago en Siigo
   rcType?: 'DebtPayment' | 'AdvancePayment' | 'Detailed';
+  ivaPercentage?: number; // Porcentaje de IVA global
 }
 
 type InvoiceFormAction =
@@ -247,7 +253,7 @@ type InvoiceFormAction =
       payload: { 
         id: string; 
         field: keyof InvoiceItem; 
-        value: string | number | boolean | { type?: string; value?: number } | undefined;
+        value: string | number | boolean | { type?: string; value?: number } | string[] | undefined;
       };
     }
   | {
@@ -263,6 +269,12 @@ type InvoiceFormAction =
         | { field: 'rcItems'; value: InvoiceState['rcItems'] }
         | { field: 'rcType'; value: 'DebtPayment' | 'AdvancePayment' | 'Detailed' }
         | { field: 'stamp' | 'mail'; value: { send: boolean } }
+        | { field: 'taxesList'; value: Array<{
+              id: string;
+              name: string;
+              percentage: number;
+              type: string;
+            }> | undefined }
       );
     }
   | { type: 'SET_PROVIDER'; payload: Provider | null }
@@ -280,10 +292,74 @@ type InvoiceFormAction =
 
 import { calculateSubtotal, calculateIVA, mapItemTypeToSiigoType, SiigoPayload } from './buildSiigoPayload';
 
-const calculateTotal = (items: InvoiceItem[], ivaPercentage: number): number => {
-  const subtotal = calculateSubtotal(items);
-  const iva = calculateIVA(items, ivaPercentage);
-  return subtotal + iva;
+type CalculateTotalParams = {
+  items: InvoiceItem[];
+  ivaPercentage?: number | string | null;
+};
+
+const calculateTotal = (params: CalculateTotalParams | InvoiceItem[], ivaPercentage?: number | string | null): number => {
+  // Handle both parameter formats for backward compatibility
+  const items = Array.isArray(params) ? params : params.items;
+  const iva = typeof ivaPercentage === 'undefined' ? 
+    (typeof params === 'object' && !Array.isArray(params) ? params.ivaPercentage : 0) : 
+    ivaPercentage;
+
+  if (!items?.length) return 0;
+
+  // Calculate total with item-level taxes and discounts
+  return items.reduce((total, item) => {
+    try {
+      // Safely parse quantity and price, default to 0 if invalid
+      const quantity = Math.max(0, isNaN(Number(item.quantity)) ? 0 : Number(item.quantity));
+      const price = Math.max(0, isNaN(Number(item.price)) ? 0 : Number(item.price));
+      
+      // Calculate item subtotal (quantity * price)
+      const itemSubtotal = quantity * price;
+      if (itemSubtotal <= 0) return total; // Skip items with 0 or negative subtotal
+      
+      // Calculate discount (if any)
+      let discount = 0;
+      if (item.discount && item.discount.value !== undefined && item.discount.value !== '') {
+        const discountValue = Number(item.discount.value) || 0;
+        if (discountValue > 0) {
+          if (item.discount.type === 'percentage') {
+            discount = Math.min(itemSubtotal, itemSubtotal * (Math.min(100, Math.max(0, discountValue)) / 100));
+          } else {
+            discount = Math.min(itemSubtotal, Math.max(0, discountValue));
+          }
+        }
+      }
+      
+      const subtotalAfterDiscount = Math.max(0, itemSubtotal - discount);
+      
+      // Calculate taxes
+      let itemTaxes = 0;
+      
+      // If item has specific taxes, use them
+      if (item.taxes?.length && item.taxesList?.length) {
+        itemTaxes = (item.taxes as string[]).reduce((taxSum, taxId) => {
+          const tax = item.taxesList?.find(t => t?.id === taxId);
+          if (tax?.percentage !== undefined) {
+            const taxPercentage = Math.max(0, Number(tax.percentage) || 0);
+            return taxSum + (subtotalAfterDiscount * (taxPercentage / 100));
+          }
+          return taxSum;
+        }, 0);
+      } 
+      // Otherwise, use the global IVA percentage if available
+      else if (iva) {
+        const ivaNumber = typeof iva === 'string' ? parseFloat(iva) : Number(iva);
+        if (!isNaN(ivaNumber) && ivaNumber > 0) {
+          itemTaxes = subtotalAfterDiscount * (Math.max(0, ivaNumber) / 100);
+        }
+      }
+      
+      return total + subtotalAfterDiscount + itemTaxes;
+    } catch (error) {
+      console.error('Error calculating item total:', error, item);
+      return total; // Skip this item if there's an error
+    }
+  }, 0);
 };
 
 // incializar el estado
@@ -297,24 +373,23 @@ const initialState: InvoiceState = {
   providerInvoiceNumber: '',
   providerInvoicePrefix: 'FC',
   observations: '',
-  ivaPercentage: 19,
   providerCode: '',
+  taxesList: [], // Will be loaded from API
   providerIdentification: '',
-  costCenter: '',
-  cufe: '',
-  currency: 'COP',
-  currencyExchangeRate: 1,
-  seller: 1,
+  costCenter: '0',
   pagos: [],
-  paymentMethod: '1',
-  dueDate: new Date().toISOString().split('T')[0],
-  stamp: { send: true },
-  mail: { send: true },
+  paymentMethod: '',
+  dueDate: '',
+  stamp: { send: false },
+  mail: { send: false },
   saleDocumentType: 'FV',
   rcDocumentId: undefined,
   rcItems: [],
+  rcType: 'DebtPayment',
   rcPaymentId: undefined,
-  rcType: 'DebtPayment'
+  currency: 'COP',
+  currencyExchangeRate: 1,
+  ivaPercentage: 19 // Valor por defecto del 19%
 };
 
 const invoiceFormReducer = (state: InvoiceState, action: InvoiceFormAction): InvoiceState => {
@@ -401,10 +476,35 @@ export function FormularioFacturas() {
     { id: 2, code: 'RC Envigado', name: 'RC Envigado' },
     { id: 999, code: 'Causación Automática', name: 'Causación Automática' }
   ];
-  const [rcDocs, setRcDocs] = useState<Array<{ id: number; code: string; name: string }>>([]);
-  const [_paymentOptions, _setPaymentOptions] = useState<unknown[]>([]); // usar tipo concreto si se conoce
-  const [fvDocs, setFvDocs] = useState<SiigoSaleDocumentResponse[]>([]);
+  const [rcDocs, setRcDocs] = useState<Array<{id: number; code: string; name: string}>>(DEFAULT_RC_DOCS);
   const [loadingFv, setLoadingFv] = useState(false);
+  const [fvDocs, setFvDocs] = useState<SiigoSaleDocumentResponse[]>([]);
+  
+  // Cargar lista de impuestos
+  useEffect(() => {
+    const loadTaxes = async () => {
+      try {
+        const response = await fetch('/api/siigo/taxes');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && Array.isArray(data.data)) {
+            const taxes = data.data.map((tax: any) => ({
+              id: tax.id,
+              name: tax.name,
+              percentage: tax.percentage,
+              type: tax.type
+            }));
+            dispatch({ type: 'UPDATE_FIELD', payload: { field: 'taxesList', value: taxes } });
+          }
+        }
+      } catch (error) {
+        console.error('Error loading taxes:', error);
+      }
+    };
+    
+    loadTaxes();
+  }, []);
+  
   // El estado de carga no se utiliza actualmente, pero se guarda para uso futuro.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_, setIsLoading] = useState(false);
@@ -434,37 +534,17 @@ export function FormularioFacturas() {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submitResult, setSubmitResult] = useState<{ success: boolean; message: string } | null>(null);
 
-  // Cargar tipos de documento RC y medios de pago
+  // Inicializar tipos de documento RC por defecto
   useEffect(() => {
-    const load = async () => {
-      try {
-        const [docsRes] = await Promise.all([
-          fetch('/api/siigo/document-types?type=RC', { cache: 'no-store' }),
-        ]);
-        if (docsRes.ok) {
-          const docsJson = await docsRes.json();
-          const list = (docsJson?.data?.results || docsJson?.data || [])
-  .map((d: { id: number; code: string; name: string }) => ({ 
-    id: d.id, 
-    code: d.code, 
-    name: d.name 
-  }))
-  .filter((d: { id: number }) => d && d.id);
-          const finalList = (list && list.length > 0) ? list : DEFAULT_RC_DOCS;
-          setRcDocs(finalList);
-          if (!state.rcDocumentId && finalList.length > 0) {
-            dispatch({ type: 'UPDATE_FIELD', payload: { field: 'rcDocumentId', value: finalList[0].id } });
-          }
-        }
-      } catch {
-        setRcDocs(DEFAULT_RC_DOCS);
-        if (!state.rcDocumentId && DEFAULT_RC_DOCS.length > 0) {
-          dispatch({ type: 'UPDATE_FIELD', payload: { field: 'rcDocumentId', value: DEFAULT_RC_DOCS[0].id } });
-        }
+    if (state.invoiceType === 'sale' && state.saleDocumentType === 'RC') {
+      setRcDocs(DEFAULT_RC_DOCS);
+      if (!state.rcDocumentId && DEFAULT_RC_DOCS.length > 0) {
+        dispatch({ type: 'UPDATE_FIELD', payload: { field: 'rcDocumentId', value: DEFAULT_RC_DOCS[0].id } });
       }
-    };
-    load();
-  }, [state.rcDocumentId]);
+    }
+  }, [state.rcDocumentId, state.invoiceType, state.saleDocumentType]);
+
+  // Cargar facturas de venta del cliente seleccionado para RC
 
   // Cargar facturas de venta del cliente seleccionado para RC
   useEffect(() => {
@@ -668,7 +748,9 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
         };
       });
 
-      const totalFactura = calculateTotal(state.items, state.ivaPercentage);
+      // Asegurarse de que ivaPercentage sea un número
+      const ivaPercentage = state.ivaPercentage !== undefined ? Number(state.ivaPercentage) : 0;
+      const totalFactura = calculateTotal(state.items, ivaPercentage);
 
       // Procesar los pagos del estado
       console.log('[FormularioFacturas] Procesando pagos del estado:', state.pagos);
@@ -1447,23 +1529,32 @@ const buildSiigoPayload = useCallback((): SiigoPaymentRequest => {
                 </Button>
               </div>
             ) : (
-              state.items.map((item, index) => (
-                <InvoiceItemForm
-                  key={item.id}
-                  item={item}
-                  index={index}
-                  isLastItem={index === state.items.length - 1}
-                  onUpdate={(id: string, field: keyof InvoiceItem, value: string | number | boolean | { type?: string; value?: number } | undefined) => {
-                    dispatch({
-                      type: 'UPDATE_ITEM',
-                      payload: { id, field, value }
-                    })
-                  }}
-                  onRemove={(id) => dispatch({ type: 'REMOVE_ITEM', payload: id })}
-                  ivaPercentage={state.ivaPercentage}
-                  disabled={isSubmitting}
-                />
-              ))
+              state.items.map((item, index) => {
+                // Ensure each item has a taxes array
+                const itemWithTaxes = {
+                  ...item,
+                  taxes: item.taxes || [],
+                  taxesList: state.taxesList || []
+                };
+                
+                return (
+                  <InvoiceItemForm
+                    key={item.id}
+                    item={itemWithTaxes}
+                    index={index}
+                    isLastItem={index === state.items.length - 1}
+                    onUpdate={(id: string, field: keyof InvoiceItem, value: any) => {
+                      dispatch({
+                        type: 'UPDATE_ITEM',
+                        payload: { id, field, value }
+                      });
+                    }}
+                    onRemove={(id) => dispatch({ type: 'REMOVE_ITEM', payload: id })}
+                    taxesList={state.taxesList || []}
+                    disabled={isSubmitting}
+                  />
+                );
+              })
             )}
           </CardContent>
         </Card>

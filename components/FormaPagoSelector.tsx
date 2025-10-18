@@ -44,25 +44,44 @@ export function FormaPagoSelector({
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState('');
 
-  // Cargar cuentas al montar el componente
+  // Cargar métodos de pago al montar el componente
   useEffect(() => {
-    const cargarCuentas = async () => {
+    const cargarMetodosPago = async () => {
       try {
         setCargando(true);
-        const res = await fetch('/api/siigo/accounts');
+        // Obtener métodos de pago de Siigo
+        const res = await fetch('/api/siigo/payment-methods');
         const { data, error } = await res.json();
         
         if (error) throw new Error(error);
-        setCuentas(data || []);
+        
+        // Mapear los métodos de pago al formato de cuentas
+        const metodosPago: Cuenta[] = [];
+        
+        if (Array.isArray(data)) {
+          data.forEach((mp: any) => {
+            if (mp && mp.id && mp.name) {
+              const tipo: 'bank' | 'cash' = mp.type === 'Cartera' ? 'cash' : 'bank';
+              metodosPago.push({
+                id: mp.id.toString(),
+                name: mp.name,
+                type: tipo,
+                number: mp.id.toString()
+              });
+            }
+          });
+        }
+        
+        setCuentas(metodosPago);
       } catch (err) {
-        console.error('Error cargando cuentas:', err);
-        setError('No se pudieron cargar las cuentas. Intente de nuevo.');
+        console.error('Error cargando métodos de pago:', err);
+        setError('No se pudieron cargar los métodos de pago. Intente de nuevo.');
       } finally {
         setCargando(false);
       }
     };
 
-    cargarCuentas();
+    cargarMetodosPago();
   }, []);
 
   // Notificar cambios en los pagos

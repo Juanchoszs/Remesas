@@ -8,18 +8,37 @@ import { Badge } from "@/components/ui/badge"
 import { Autocomplete } from "@/components/autocomplete"
 import { InvoiceItem } from "@/types/siigo"
 import { Trash2 } from "lucide-react"
+import { TaxSelector } from "./TaxSelector"
+import { useEffect, useState } from "react"
+
+interface Tax {
+  id: string;
+  name: string;
+  percentage: number;
+  type: string;
+}
+
+const DEFAULT_TAXES: Tax[] = [
+  { id: '1', name: 'IVA 19%', percentage: 19, type: 'IVA' },
+  { id: '2', name: 'IVA 5%', percentage: 5, type: 'IVA' },
+  { id: '3', name: 'IVA 0%', percentage: 0, type: 'IVA' },
+  { id: '4', name: 'ICA', percentage: 1.2, type: 'ICA' },
+  { id: '5', name: 'ReteIVA', percentage: 15, type: 'ReteIVA' },
+  { id: '6', name: 'ReteICA', percentage: 2.4, type: 'ReteICA' },
+  { id: '7', name: 'ReteFuente', percentage: 3.5, type: 'ReteFuente' },
+];
 
 type InvoiceItemFormProps = {
   item: InvoiceItem
   onUpdate: (
     id: string, 
     field: keyof InvoiceItem, 
-    value: string | number | boolean | { type?: string; value?: number } | undefined
+    value: string | number | boolean | { type?: string; value?: number } | string[] | undefined
   ) => void
   onRemove: (id: string) => void
   index: number
   isLastItem: boolean
-  ivaPercentage: number
+  taxesList?: Tax[]
   disabled?: boolean
 }
 
@@ -29,10 +48,11 @@ export function InvoiceItemForm({
   onRemove,
   index,
   isLastItem,
-  ivaPercentage,
+  taxesList = [],
   disabled = false
 }: InvoiceItemFormProps) {
-  
+  const taxes = taxesList.length > 0 ? taxesList : DEFAULT_TAXES;
+
   const calculateItemSubtotal = () => {
     const subtotal = (item.quantity || 0) * (item.price || 0);
     const discount = item.discount?.value || 0;
@@ -41,9 +61,59 @@ export function InvoiceItemForm({
 
   const calculateItemTotal = () => {
     const subtotal = calculateItemSubtotal();
-    const iva = item.hasIVA ? subtotal * (ivaPercentage / 100) : 0;
-    return subtotal + iva;
+    const taxAmount = calculateTaxes();
+    return subtotal + taxAmount;
   };
+
+  // Manejar cambio en los impuestos del ítem
+  const handleTaxChange = (taxIds: string[]) => {
+    onUpdate(item.id, 'taxes', taxIds);
+  };
+
+  // Manejar cambio en el checkbox de impuestos
+  const handleTaxesCheckboxChange = (checked: boolean) => {
+    if (!checked) {
+      // Si se desactivan los impuestos, eliminamos todos los impuestos
+      onUpdate(item.id, 'taxes', []);
+    }
+    onUpdate(item.id, 'hasTaxes', checked);
+  };
+
+  // Calcular el total de impuestos para el ítem
+  const calculateTaxes = () => {
+    if (item.hasTaxes === false) return 0;
+    
+    const subtotal = calculateItemSubtotal();
+    return (item.taxes || []).reduce((total, taxId) => {
+      const tax = taxes.find(t => t.id === taxId);
+      return total + (tax ? (subtotal * (tax.percentage / 100)) : 0);
+    }, 0);
+  };
+
+  // Calcular detalles de impuestos para mostrar
+  const calculateTaxDetails = () => {
+    const subtotal = calculateItemSubtotal();
+    const taxMap = new Map<string, {tax: Tax, amount: number}>();
+    
+    (item.taxes || []).forEach(taxId => {
+      const tax = taxes.find(t => t.id === taxId);
+      if (tax) {
+        const amount = subtotal * (tax.percentage / 100);
+        taxMap.set(tax.type, {
+          tax,
+          amount: (taxMap.get(tax.type)?.amount || 0) + amount
+        });
+      }
+    });
+    
+    return Array.from(taxMap.values());
+  };
+
+  const taxDetails = calculateTaxDetails();
+  const hasAnyTaxes = (item.taxes || []).length > 0;
+  const itemTotal = calculateItemTotal();
+  const itemTaxes = calculateTaxes();
+  const itemSubtotal = calculateItemSubtotal();
 
   return (
     <div className="border rounded-lg p-4 space-y-4">
@@ -204,47 +274,78 @@ export function InvoiceItemForm({
         <div className="space-y-2">
           <div className="flex items-center space-x-2">
             <Checkbox
-              id={`iva-${item.id}`}
-              checked={item.hasIVA !== false}
-              onCheckedChange={(checked) => onUpdate(item.id, 'hasIVA', checked)}
+              id={`taxes-${item.id}`}
+              checked={item.hasTaxes !== false}
+              onCheckedChange={(checked) => handleTaxesCheckboxChange(checked as boolean)}
               disabled={disabled}
             />
-            <Label htmlFor={`iva-${item.id}`} className="text-sm font-medium">
-              Este item tiene IVA
+            <Label htmlFor={`taxes-${item.id}`} className="text-sm font-medium">
+              Este artículo tiene impuestos
             </Label>
           </div>
-          {item.hasIVA !== false && (
-            <Badge variant="secondary" className="text-xs">
-              IVA aplicado: {ivaPercentage}%
-            </Badge>
+          {item.hasTaxes !== false && item.taxes && item.taxes.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {item.taxes.map(taxId => {
+                const tax = taxes.find(t => t.id === taxId);
+                if (!tax) return null;
+                const amount = calculateItemSubtotal() * (tax.percentage / 100);
+                return (
+                  <div key={taxId} className="text-xs text-muted-foreground">
+                    {tax.name} ({tax.percentage}%): ${amount.toFixed(2)}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
+
+        {item.hasTaxes !== false && (
+          <div className="space-y-2">
+            <Label>Impuestos</Label>
+            <TaxSelector
+              selectedTaxes={item.taxes || []}
+              onTaxChange={handleTaxChange}
+              taxes={taxes}
+              disabled={disabled}
+            />
+            {hasAnyTaxes && (
+              <div className="mt-2 space-y-1">
+                {taxDetails.map(({tax, amount}) => (
+                  <div key={tax.id} className="text-xs text-muted-foreground">
+                    {tax.name} ({tax.percentage}%): ${amount.toFixed(2)}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="bg-muted p-3 rounded-md">
         <div className="space-y-2">
-          <div className="flex justify-between items-center">
-            <span className="text-sm">Subtotal:</span>
-            <span className="text-sm font-medium">
-              ${calculateItemSubtotal().toLocaleString("es-CO", { 
-                minimumFractionDigits: 2 
-              })} COP
-            </span>
-          </div>
-          
-          {item.hasIVA !== false && (
-            <div className="flex justify-between items-center">
-              <span className="text-sm">IVA ({ivaPercentage}%):</span>
-              <span className="text-sm font-medium">
-                ${(calculateItemSubtotal() * (ivaPercentage / 100)).toLocaleString("es-CO", { 
-                  minimumFractionDigits: 2 
-                })} COP
-              </span>
+          {(item.taxes || []).length > 0 && (
+            <div className="space-y-1">
+              {item.taxes?.map(taxId => {
+                const tax = taxes.find(t => t.id === taxId);
+                if (!tax) return null;
+                const taxAmount = calculateItemSubtotal() * (tax.percentage / 100);
+                
+                return (
+                  <div key={taxId} className="flex justify-between items-center">
+                    <span className="text-sm">{tax.name} ({tax.percentage}%):</span>
+                    <span className="text-sm font-medium">
+                      ${taxAmount.toLocaleString("es-CO", { 
+                        minimumFractionDigits: 2 
+                      })} COP
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
           
           <div className="flex justify-between items-center border-t pt-2">
-            <span className="text-sm font-bold">Total Item:</span>
+            <span className="text-sm font-bold">Total:</span>
             <span className="text-sm font-bold text-green-600">
               ${calculateItemTotal().toLocaleString("es-CO", { 
                 minimumFractionDigits: 2 

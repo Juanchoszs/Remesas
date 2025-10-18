@@ -85,13 +85,12 @@ export const buildSiigoPayload = (state: any): SiigoPayload => {
     // Configurar pagos según documentación de Siigo
     console.log('Estado de pagos recibido en buildSiigoPayload:', state.pagos);
     
-    console.log('Procesando pagos del estado:', state.pagos);
     const payments = (state.pagos || []).map((pago: any, index: number) => {
       // Extraer el paymentMethod del pago
-      const paymentMethod = pago.paymentMethod;
+      const paymentMethod = pago.paymentMethod || {};
       
-      // Si no hay paymentMethod, intentar obtener el ID de otras propiedades
-      let paymentMethodId = paymentMethod?.id || pago.paymentMethodId || pago.cuentaId || pago.id;
+      // Obtener el ID del método de pago de las propiedades disponibles
+      let paymentMethodId = paymentMethod.id || pago.paymentMethodId || pago.cuentaId || pago.id;
       const paymentValue = Number(pago.value || pago.monto || 0);
       
       // Validar que tengamos un ID de método de pago válido
@@ -100,10 +99,17 @@ export const buildSiigoPayload = (state: any): SiigoPayload => {
         throw new Error(`El método de pago ${index + 1} no tiene un ID válido`);
       }
       
-      // Convertir el ID a número si es posible
-      if (typeof paymentMethodId === 'string') {
-        const numId = Number(paymentMethodId);
-        paymentMethodId = isNaN(numId) ? paymentMethodId : numId;
+      // Asegurarnos de que el ID sea un número
+      paymentMethodId = parseInt(paymentMethodId, 10);
+      if (isNaN(paymentMethodId)) {
+        console.error(`[buildSiigoPayload] Error: ID de método de pago inválido: ${paymentMethodId}`, pago);
+        throw new Error(`ID de método de pago inválido: ${paymentMethodId}`);
+      }
+      
+      // Validar que el valor del pago sea mayor a cero
+      if (paymentValue <= 0) {
+        console.warn(`[buildSiigoPayload] Advertencia: El pago ${index + 1} tiene un valor de ${paymentValue} y será omitido`);
+        return null;
       }
       
       console.log(`[buildSiigoPayload] Pago ${index + 1} procesado:`, {

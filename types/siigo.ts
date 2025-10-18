@@ -10,10 +10,21 @@ export interface InvoiceItem {
   price: number;
   warehouse?: string;
   hasIVA?: boolean;
+  hasTaxes?: boolean;
   discount?: {
     value?: number;
     percentage?: number;
+    type?: 'percentage' | 'fixed';
   };
+  taxes?: string[];
+  taxesList?: Tax[];
+}
+
+export interface Tax {
+  id: string;
+  name: string;
+  percentage: number;
+  type: string;
 }
 
 // Tipos según la documentación oficial de Siigo
